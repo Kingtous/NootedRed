@@ -51,14 +51,21 @@ no patch
 
 ### 多 APU
 
-目前所有 gfx9 APU 共用同一份 15.8.1 页镜像：
+当前 `kGLDriverPatchSets` 按 family 分成三条：
+
+1. Renoir / RenoirE / Green Sardine；
+2. Raven / Raven2 / Picasso；
+3. 通用 fallback（attributes 尚未填充时才匹配）。
+
+前两条目前指向同一份 15.8.1 页镜像：
 
 - GL A1/A2：同一 `AMDRadeonX5000GLDriver` 页；
 - Metal gate/setz：同一 `AMDRadeonX5000MTLDriver` shared-cache 页；
-- Renoir/Raven/Picasso/Raven2 都走同一个 Vega10 HwInfo 分支（A1 只改第 1 个分支），所以当前 `kApuAll` 是合理的；
-- 如果未来某颗 APU 走不同 HwInfo 分支，新增一个 `PatchSet` 并设置对应 `apus` 即可，不需要改后端。
+- Renoir/Raven/Picasso/Raven2 都走同一个 Vega10 HwInfo 分支（A1 只改第 1 个分支）。
 
-**限制**：当前还没有 Raven/Picasso/Cezanne 的实机验证；`kApuAll` 是代码层面的兼容范围，不是已验证声明。
+如果未来某颗 APU 走不同 HwInfo 分支，只改对应 family 条目的 `patches` 指针即可，不需要改后端或选择逻辑。
+
+**限制**：当前还没有 Raven/Picasso/Cezanne 的实机验证；family 条目是代码层面的兼容范围，不是已验证声明。
 
 ## 新增一个 macOS 版本
 
@@ -85,6 +92,15 @@ python3 tools/gen_patch_data.py tools/patch-specs/<version>.json --out /tmp/new-
 - 输出页数组、find/replace 数组、`PagePatch` 表和 `PatchSet`。
 
 工具不会猜测偏移；必须由人提供目标版本的页偏移/VA 和指令字节。
+
+## 本轮验证
+
+- `xmake -y` release 构建通过；
+- 用源文件里的 4 KiB 页镜像构造了一个 vanilla GL driver，运行 `tools/gen_patch_data.py`，成功找到：
+  - GL HwInfo page +0x81；
+  - GL dual-quad page +0x160；
+  - 输出合法的 `PagePatch`/`PatchSet` C++ 片段；
+- 未安装/重启，因此尚未验证 `Selected patch set` 日志和实际页投递。
 
 ## 安全边界
 
