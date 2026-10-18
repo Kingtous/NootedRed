@@ -178,7 +178,41 @@ store CB_COLOR_CONTROL
 
 ---
 
-## 9. 结论
+## 9. Step 1 实验结果（已在本机用户态验证）
+
+在进程内对 Metal 驱动做三个 patch 做 A/B（不需要重启）：
+
+```text
+A3 还原：0x5c1c0   83 C9 01 -> 83 E1 FE
+gate：    0x5c164   75 0B    -> EB 0B     ; 强制计算 dualSource || !allowRBPlus
+allow：   0x5c198   0F 94 C0 -> 31 C0 90 ; 视为 allowRBPlus=true
+```
+
+结果（读 `GFX9_MtlRenderPipelineState.m_members+0x28`）：
+
+| 组合 | 单源 | 双源 |
+| --- | --- | --- |
+| 还原 A3 | 0x00cc0010 (DISABLE=0) | 0x00cc0010 (DISABLE=0) — 原始 bug |
+| gate | 0x00cc0011 | 0x00cc0011 — 仍全局关闭 |
+| gate + setz→0 | **0x00cc0010 (DISABLE=0)** | **0x00cc0011 (DISABLE=1)** — 目标状态 |
+
+并且用同一组 patch 做了真实 Metal 渲染 + blit + CPU 对比：
+
+```text
+dual=0 control=00cc0010 disable=0  pixel 96,128,160,191  PASS
+dual=1 control=00cc0011 disable=1  pixel 128,160,192,223 PASS
+```
+
+没有产生新的 `gpuReset`。这证明“条件化”是可行的：普通 pipeline 保留 RB+，只有双源 pipeline 关闭。
+
+已把该实验写入研究分支的 `UserPatches.cpp`（替换原来的 Metal 全局 `and ecx,~1` patch）：
+
+- page `0x7ffb087b3000` + `0x164`：`75 0B` → `EB 0B`
+- page `0x7ffb087b3000` + `0x198`：`0F 94 C0` → `31 C0 90`
+
+release 构建通过；**尚未安装到 EFI/重启验证内核页补丁投递**，也未做性能 benchmark。
+
+## 10. 结论
 
 “性能更好、通用性更强”的方向是存在的，但**不是简单再改几字节**：
 
