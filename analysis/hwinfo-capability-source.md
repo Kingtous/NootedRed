@@ -100,6 +100,21 @@ dual=1 control=00cc0011 disable=1  pixel 128,160,192,223 PASS
 
 无 GPU reset。source-level patch 已验证可替代 gate/setz 实现。
 
+## 4.2 回归：源头版本会导致视觉错误（2026-10-18 23:16）
+
+用户实际使用后报告 Chromium/Electron 界面出现黑块、缩略图缺失等渲染错误（没有卡死）。  
+回滚分析：
+
+- 源头补丁把 `HwInfo+0xa0` bit1 置 1，该 bit 不只用于 pipeline 的 `DISABLE_DUAL_QUAD` 决策；
+  `amdMtl_HWL_InitDeviceSettings` 会把它写入 `AMD_DeviceSettings` bit 34（`0x400000000`），
+  可能同时影响其他 RB+ 行为（tiling/DCC/UBM 等）。
+- 旧的 gate/setz 条件化版本只强制 pipeline condition，**没有**置 HwInfo bit1 / DeviceSettings bit34，
+  因此不会启用这些额外的 RB+ 路径；用户在使用该版本时没有报告此类视觉错误。
+- 结论：source-level bit1 不是“纯 capability 开关”，在 Renoir 的其余 HwInfo 参数（SE/CU/TCC/
+  GB_ADDR_CONFIG）没有完整修正前，不能直接启用。
+
+处理：立即回滚 `master` 到 gate/setz 条件化版本；source-level 研究保留在本分支，不作为生产修复。
+
 ## 5. GL 为什么不能同样从源头修
 
 GL 的 `_glrAMD_GFX9_UpdateHwCbDualQuadMode` 与 Metal 不同：
