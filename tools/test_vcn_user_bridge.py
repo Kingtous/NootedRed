@@ -12,6 +12,10 @@ def main():
     stub.mkdir(parents=True, exist_ok=True)
     (stub / "IOTypes.h").write_text("#pragma once\n#include <cstdint>\n"
                                  "using UInt8=uint8_t;using UInt32=uint32_t;using UInt64=uint64_t;\n")
+    (stub / "IOUserClient.h").write_text((ROOT / "tools/fixtures/fairplay-entitlement.hpp.in").read_text())
+    boolean = WORK / "stubs/libkern/c++"
+    boolean.mkdir(parents=True, exist_ok=True)
+    (boolean / "OSBoolean.h").write_text('#pragma once\n#include <IOKit/IOUserClient.h>\n')
     util = WORK / "stubs/Headers"
     util.mkdir(parents=True, exist_ok=True)
     (util / "kern_util.hpp").write_text('#pragma once\n#include <IOKit/IOTypes.h>\n')

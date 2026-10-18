@@ -118,12 +118,17 @@ bool restorePages(vm_map_t map, Page* pages, const UInt32 count)
     bool restored = true;
     for (UInt32 i = 0; i < count; ++i) {
         if (!pages[i].writable) { continue; }
+        // 先恢复当前权限，再下调最大权限；set_maximum 会取当前权限与新最大权限的交集。
         auto result = vm_protect(map, pages[i].address, PAGE_SIZE, FALSE, pages[i].protection);
         if (result != KERN_SUCCESS) {
             error(result);
             result = vm_protect(map, pages[i].address, PAGE_SIZE, FALSE, pages[i].protection);
         }
-        if (result == KERN_SUCCESS) { pages[i].writable = false; }
+        if (result == KERN_SUCCESS) {
+            const auto maximum = vm_protect(map, pages[i].address, PAGE_SIZE, TRUE, pages[i].protection);
+            if (maximum != KERN_SUCCESS) { error(maximum); }
+            pages[i].writable = false;
+        }
         else { restored = false; }
     }
     return restored;
@@ -174,7 +179,15 @@ kern_return_t installSubmitGuard(vm_map_t map, const UInt64 base, bool& fresh)
     result = vm_protect(map, methodPage, PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
     if (result != KERN_SUCCESS) { return result; }
     const auto written = writeUser(patch, method, sizeof(patch));
-    const auto restored = vm_protect(map, methodPage, PAGE_SIZE, FALSE, protection);
+    // 先恢复当前权限，再下调最大权限；下调失败时保留补丁并记录错误。
+    auto restored = vm_protect(map, methodPage, PAGE_SIZE, FALSE, protection);
+    if (restored != KERN_SUCCESS) {
+        restored = vm_protect(map, methodPage, PAGE_SIZE, FALSE, protection);
+    }
+    if (restored == KERN_SUCCESS) {
+        const auto maximum = vm_protect(map, methodPage, PAGE_SIZE, TRUE, protection);
+        if (maximum != KERN_SUCCESS) { error(maximum); }
+    }
     if (written != 0 || restored != KERN_SUCCESS) { return KERN_FAILURE; }
     fresh = true;
     return KERN_SUCCESS;

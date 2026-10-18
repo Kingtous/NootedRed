@@ -11,6 +11,10 @@ def main():
     stub = WORK / 'stubs/IOKit'
     stub.mkdir(parents=True, exist_ok=True)
     (stub / 'IOTypes.h').write_text('#pragma once\n#include <cstdint>\nusing UInt8=uint8_t;using UInt32=uint32_t;using UInt64=uint64_t;\n')
+    (stub / 'IOUserClient.h').write_text((ROOT / 'tools/fixtures/fairplay-entitlement.hpp.in').read_text())
+    boolean = WORK / 'stubs/libkern/c++'
+    boolean.mkdir(parents=True, exist_ok=True)
+    (boolean / 'OSBoolean.h').write_text('#pragma once\n#include <IOKit/IOUserClient.h>\n')
     util = WORK / 'stubs/Headers'
     util.mkdir(parents=True, exist_ok=True)
     (util / 'kern_util.hpp').write_text('#pragma once\n#include <IOKit/IOTypes.h>\n')
@@ -24,9 +28,15 @@ def main():
                                '#include <vector>\n#include "UserSurfaceSyncData.hpp"\n#include "UserSurfaceSyncResolver.hpp"')
     harness = preamble + r'''
 #include "user-cache-dynamic.hpp"
+#include <UserSubmitGuardData.hpp>
+constexpr int KERN_INVALID_ADDRESS=1,KERN_PROTECTION_FAILURE=2,VM_FLAGS_ANYWHERE=1;
+using vm_address_t=uint64_t;
+static kern_return_t vm_allocate(vm_map_t,vm_address_t* page,unsigned,int){*page=0;return KERN_FAILURE;}
+static kern_return_t vm_deallocate(vm_map_t,vm_address_t,unsigned){return KERN_SUCCESS;}
 static int proc_pid(proc_t);static void proc_name(int,char*,int);
-static kern_return_t vm_protect(vm_map_t,uint64_t a,unsigned,int,int flags){
- protects++;if(protects==failedProtect || failedProtectCalls.contains(protects))return 42;assert(protections.contains(a));protections[a]=flags&7;return 0;}
+static kern_return_t vm_protect(vm_map_t,uint64_t a,unsigned,int setMax,int flags){
+ protects++;if(protects==failedProtect || failedProtectCalls.contains(protects))return 42;assert(protections.contains(a));
+ if(setMax)protections[a]&=flags&7;else protections[a]=flags&7;return 0;}
 BODY
 static int original(proc_t,SharedRegionCheckArgs*,int* value){*value=123;return 0;}
 static int proc_pid(proc_t){return 217;}static void proc_name(int,char* name,int size){snprintf(name,size,"Weather");}

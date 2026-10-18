@@ -34,13 +34,16 @@ def main():
 #include <optional>
 #include <PenguinWizardry/KernelVersion.hpp>
 #include <UserSurfaceSyncData.hpp>
+#include <UserSubmitGuardData.hpp>
 #include <UserSurfaceSyncResolver.hpp>
 using user_addr_t=uint64_t;using mach_vm_address_t=uint64_t;using mach_vm_size_t=uint64_t;
 using vm_map_t=void*;using task_t=void*;using proc_t=void*;using natural_t=unsigned;
 using mach_msg_type_number_t=unsigned;using vm_prot_t=int;using kern_return_t=int;
-struct vm_region_submap_short_info_data_64_t {int protection=0,is_submap=0;};using vm_region_recurse_info_t=int*;
+struct vm_region_submap_short_info_data_64_t {int protection=0,max_protection=0,is_submap=0;};using vm_region_recurse_info_t=int*;
 constexpr unsigned PAGE_SIZE=4096,VM_REGION_SUBMAP_SHORT_INFO_COUNT_64=12;
-constexpr int FALSE=0,KERN_SUCCESS=0,KERN_INVALID_ARGUMENT=4,KERN_FAILURE=5;
+constexpr int TRUE=1,FALSE=0,KERN_SUCCESS=0,KERN_INVALID_ADDRESS=1,KERN_PROTECTION_FAILURE=2,KERN_INVALID_ARGUMENT=4,KERN_FAILURE=5;
+constexpr int VM_FLAGS_ANYWHERE=1;
+using vm_address_t=uint64_t;
 constexpr int VM_PROT_NONE=0,VM_PROT_READ=1,VM_PROT_WRITE=2,VM_PROT_EXECUTE=4,VM_PROT_COPY=16;
 #define SYSLOG(...) ((void)0)
 template<typename T,size_t N>constexpr size_t arrsize(const T(&)[N]){return N;}
@@ -50,7 +53,7 @@ struct NRed {static NRed& singleton(){static NRed n;return n;}void setProp32(con
  unsigned getDeviceID(){return device; }static unsigned device;};unsigned NRed::device=0x1638;
 struct Version{static unsigned majorValue,minorValue;};unsigned Version::majorValue=25;unsigned Version::minorValue=6;
 const PenguinWizardry::KernelVersion& currentKernelVersion(){static std::optional<PenguinWizardry::KernelVersion> current;return current.emplace(Version::majorValue,Version::minorValue);}
-static bool flag=true,candidateFlag=false,legacyFlag=false,transferFlag=false,scratchFlag=false;static bool checkKernelArgument(const char* s){if(strcmp(s,"-NRedComputeScratch")==0)return scratchFlag;if(strcmp(s,"-NRedTransfer1x1")==0)return transferFlag;if(strcmp(s,"-NRedLegacyBlend")==0)return legacyFlag;if(strcmp(s,"-NRedSrdShared")==0)return candidateFlag;assert(strcmp(s,"-NRedImmediateSync")==0);return flag;}
+static bool flag=true,candidateFlag=false,legacyFlag=false,transferFlag=false,scratchFlag=false,noSubmitGuard=true;static bool checkKernelArgument(const char* s){if(strcmp(s,"-NRedNoSubmitGuard")==0)return noSubmitGuard;if(strcmp(s,"-NRedComputeScratch")==0)return scratchFlag;if(strcmp(s,"-NRedTransfer1x1")==0)return transferFlag;if(strcmp(s,"-NRedLegacyBlend")==0)return legacyFlag;if(strcmp(s,"-NRedSrdShared")==0)return candidateFlag;assert(strcmp(s,"-NRedImmediateSync")==0);return flag;}
 struct KernelPatcher{
  static constexpr int KernelID=0;int solves=0,routes=0;bool missing=false,routeOK=true;
  struct RouteRequest{template<typename T>RouteRequest(const char*,T,uint64_t&) {}};
@@ -61,7 +64,7 @@ static task_t current_task(){return reinterpret_cast<void*>(1);}
 static bool isWindowServer=false,isWeather=false;
 static int proc_pid(proc_t p){return int(reinterpret_cast<uintptr_t>(p));}
 static void proc_name(int,char* name,int size){snprintf(name,size,"%s",isWeather?"Weather":(isWindowServer?"WindowServer":"Other"));}
-static std::map<uint64_t,int> protection;
+static std::map<uint64_t,int> protection,maxProtection;
 static std::set<int> failProtect;
 static int protectCalls=0,writeCalls=0,failWrite=0,originalResult=0,regionMode=0;
 static bool invalidCache=false,noMap=false;
@@ -70,9 +73,12 @@ constexpr auto MaxN=arrsize(UserSurfaceSyncData::ComputeScratchPatches);
 static size_t N=2;
 static std::array<std::array<uint8_t,UserSurfaceSyncData::MaxPatchSize>,MaxN> code;
 static bool withdrawnCode=false;
-static kern_return_t vm_protect(vm_map_t,uint64_t address,unsigned,int,vm_prot_t flags){
+static kern_return_t vm_allocate(vm_map_t,vm_address_t* page,unsigned,int){*page=0;return KERN_FAILURE;}
+static kern_return_t vm_deallocate(vm_map_t,vm_address_t,unsigned){return KERN_SUCCESS;}
+static kern_return_t vm_protect(vm_map_t,uint64_t address,unsigned,int setMax,vm_prot_t flags){
  protectCalls++;if(failProtect.contains(protectCalls))return 42;
- assert(protection.contains(address));protection[address]=flags&7;return 0;
+ assert(protection.contains(address));const int value=flags&7;
+ if(setMax){maxProtection[address]=value;protection[address]&=value;}else{protection[address]=value;maxProtection[address]|=value;}return 0;
 }
 BODY
 INIT
@@ -86,6 +92,7 @@ static kern_return_t query(vm_map_t,uint64_t* address,uint64_t* size,unsigned* d
  info->is_submap=*depth==0;
  if(*depth==0)info->protection=1;else if(protection.contains(*address))info->protection=protection.at(*address);
  else{fprintf(stderr,"query page missing: address=%llx depth=%u, known pages:",(unsigned long long)*address,*depth);for(auto [page,flags]:protection)fprintf(stderr," %llx=%d",(unsigned long long)page,flags);fputc('\n',stderr);abort();}
+ if(*depth==0)info->max_protection=5;else info->max_protection=maxProtection.at(*address);
  if(regionMode==2)*address+=PAGE_SIZE;if(regionMode==3)*count=1;if(regionMode==4)*size=PAGE_SIZE-1;
  return 0;
 }
@@ -106,14 +113,14 @@ static int writer(const void* p,uint64_t address,size_t size){
  assert(false);return 1;
 }
 static void reset(){
- protection.clear();properties.clear();failProtect.clear();protectCalls=writeCalls=failWrite=originalResult=regionMode=0;
+ protection.clear();maxProtection.clear();properties.clear();failProtect.clear();protectCalls=writeCalls=failWrite=originalResult=regionMode=0;
  invalidCache=noMap=withdrawnCode=false;seenStages=appliedCount=errorCount=windowServerCount=weatherCount=0;isWindowServer=isWeather=false;
- for(size_t i=0;i<MaxN;i++){auto& p=UserSurfaceSyncData::ComputeScratchPatches[i];memcpy(code[i].data(),p.original,p.size);if(i<N)protection[(base+p.offset)&~uint64_t(4095)]=5;}
+ for(size_t i=0;i<MaxN;i++){auto& p=UserSurfaceSyncData::ComputeScratchPatches[i];memcpy(code[i].data(),p.original,p.size);if(i<N){const auto page=(base+p.offset)&~uint64_t(4095);protection[page]=5;maxProtection[page]=5;}}
  originalCheck=reinterpret_cast<uint64_t>(original);getTaskMap=map;queryRegion=query;readUser=reader;writeUser=writer;
 }
 static void call(proc_t process=nullptr){SharedRegionCheckArgs args{0x1000};int value=0;assert(wrappedSharedRegionCheck(process,&args,&value)==originalResult && value==123);}
 static void bytes(bool patched){for(size_t i=0;i<N;i++){auto& p=active()[i];assert(memcmp(code[i].data(),patched?p.patched:p.original,p.size)==0);}}
-static void rx(){for(auto [a,p]:protection)assert(p==5);}
+static void rx(){for(auto [a,p]:protection){assert(p==5);assert(maxProtection.at(a)==5);}}
 int main(int argc,char** argv){
  for(bool enabled:{false,true}){flag=enabled;KernelPatcher p;UserSurfaceSync::init(p);assert(p.routes==int(enabled));}
  flag=false;candidateFlag=true;KernelPatcher candidateOnly;UserSurfaceSync::init(candidateOnly);
@@ -161,7 +168,7 @@ scratchFlag=argc>1&&strcmp(argv[1],"--scratch")==0;candidateFlag=argc>1&&strcmp(
  for(int p=1;p<=int(computeScratch?3:(legacyFlag?2:1));p++){reset();failProtect.insert(p);call();assert(writeCalls==0);bytes(false);rx();}
  for(int entry=1;entry<=int(N);entry++){reset();failWrite=entry;call();bytes(false);rx();assert(!properties.contains("NRedImmediateSyncApplied"));}
  reset();failProtect={int(computeScratch?3:(legacyFlag?2:1))+1,int(computeScratch?3:(legacyFlag?2:1))+2};call();bytes(false);rx();assert(properties.at("NRedImmediateSyncD13")==1 && !properties.contains("NRedImmediateSyncApplied"));
- reset();failProtect={int(computeScratch?3:(legacyFlag?2:1))+1};call();bytes(true);rx();assert(properties.at("NRedImmediateSyncApplied")==1);
+ reset();failProtect={int(computeScratch?3:(legacyFlag?2:1))+1};call();bytes(true);rx();assert(properties.at("NRedImmediateSyncApplied")==1 && properties.at("NRedImmediateSyncLastError")==42);
  // UUID 变化本身不再决定兼容；未知布局仍必须通过动态解析器的内容核验。
  reset();invalidCache=true;call();assert(protectCalls==0 && writeCalls==0);bytes(false);
  reset();code[1][0]^=1;call();assert(protectCalls==0 && writeCalls==0);
@@ -190,7 +197,7 @@ scratchFlag=argc>1&&strcmp(argv[1],"--scratch")==0;candidateFlag=argc>1&&strcmp(
   reset();isWeather=true;call(reinterpret_cast<void*>(1062));assert(properties.at("NRedComputeScratchWeatherPID")==1062 && properties.at("NRedComputeScratchApplied")==1);
   reset();isWeather=true;failWrite=4;call(reinterpret_cast<void*>(1062));assert(!properties.contains("NRedComputeScratchWeatherPID"));bytes(false);rx();
  }
- puts("PASS actual bridge: default-off/host/cache/code gates; every page/partial write rollback; RX restoration");
+ puts("PASS actual bridge: default-off/host/cache/code gates; every page/partial write rollback; RX/max protection restoration");
 }
 '''.replace("BODY", body).replace("INIT", init).replace("SUPPORTED_IDS", ",".join(map(str, sorted(devices)))).replace("properties.at(", "property(")
     file = WORK / "test-bridge.cpp"

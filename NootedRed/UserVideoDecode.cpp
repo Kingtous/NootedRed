@@ -3,6 +3,7 @@
 #include <IOKit/IOLib.h>
 #include <NRed.hpp>
 #include <PenguinWizardry/KernelVersion.hpp>
+#include <UserPatchPolicy.hpp>
 #include <UserVideoDecode.hpp>
 #include <UserVideoDecodeData.hpp>
 #include <UserVideoDecodeResolver.hpp>
@@ -129,12 +130,17 @@ namespace
         bool restored = true;
         for (UInt32 i = 0; i < count; ++i) {
             if (!pages[i].writable) { continue; }
+            // 先恢复当前权限，再下调最大权限；set_maximum 会取当前权限与新最大权限的交集。
             auto result = vm_protect(map, pages[i].address, PAGE_SIZE, FALSE, pages[i].protection);
             if (result != KERN_SUCCESS) {
                 error(result);
                 result = vm_protect(map, pages[i].address, PAGE_SIZE, FALSE, pages[i].protection);
             }
-            if (result == KERN_SUCCESS) { pages[i].writable = false; }
+            if (result == KERN_SUCCESS) {
+                const auto maximum = vm_protect(map, pages[i].address, PAGE_SIZE, TRUE, pages[i].protection);
+                if (maximum != KERN_SUCCESS) { error(maximum); }
+                pages[i].writable = false;
+            }
             else {
                 restored = false;
             }
@@ -222,6 +228,15 @@ namespace
         const auto result = reinterpret_cast<SharedRegionCheck>(originalCheck)(process, args, returnValue);
         if (result != 0) {
             stage(Stage::OriginalError);
+            return result;
+        }
+        // FairPlay 客户端必须保持视频驱动原生代码：打过 VCN 补丁的 AppleGVA/VADriver 页面
+        // 会使受保护内容的 key request 生成失败（Music 实测 -15842）。实际解码在
+        // VTDecoderXPCService（无 fpsd entitlement）中完成，该进程仍会应用 VCN 补丁。
+        if (UserPatchPolicy::isFairPlayClient(current_task())) {
+            const auto pid = process != nullptr ? proc_pid(process) : -1;
+            if (pid > 0) { NRed::singleton().setProp32("NRedVCNFairPlaySkipPID", static_cast<UInt32>(pid)); }
+            NRed::singleton().setProp32("NRedVCNFairPlaySkipped", 1);
             return result;
         }
         if (!VCN::allocated() || !devicePatches) {
