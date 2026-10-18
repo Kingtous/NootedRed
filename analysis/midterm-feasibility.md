@@ -212,7 +212,34 @@ dual=1 control=00cc0011 disable=1  pixel 128,160,192,223 PASS
 
 release 构建通过；**尚未安装到 EFI/重启验证内核页补丁投递**，也未做性能 benchmark。
 
-## 10. 结论
+## 10. 内核投递验证（2026-10-18 22:56，已重启）
+
+把研究分支的 kext 安装到 EFI 并重启后，验证真正的 NootedRed 页补丁投递（不是进程内模拟）：
+
+- `kextstat`：NootedRed 已加载，`boot-args` 含 `-NRedGLFix`；
+- 启动后无新 `Kernel_*.gpuRestart`，`recoveryCount` 全为 0；
+- Metal pipeline 检查：
+
+```text
+dual=0 CB_COLOR_CONTROL=0x00cc0010 DISABLE_DUAL_QUAD=0   ; 普通 pipeline 保留 RB+
+dual=1 CB_COLOR_CONTROL=0x00cc0011 DISABLE_DUAL_QUAD=1   ; 双源 pipeline 关闭 RB+
+```
+
+- 真实 Metal 渲染 + blit + CPU 对比：
+
+```text
+dual=0 pixel 96,128,160,191 PASS
+dual=1 pixel 128,160,192,223 PASS
+```
+
+说明：
+
+- `UserPatches` 的 shared-cache 页投递对 Metal 页面有效；
+- 条件化 patch 确实只影响双源 pipeline，普通 pipeline 的 RB+ 保留；
+- 尚未做性能 benchmark，因此“性能提升多少”仍未量化；
+- 当前 master/生产分支仍是全局关闭版本；研究分支版本已在 EFI 上验证。
+
+## 11. 结论
 
 “性能更好、通用性更强”的方向是存在的，但**不是简单再改几字节**：
 
