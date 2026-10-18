@@ -79,6 +79,27 @@ dual=1 CB_COLOR_CONTROL=0x00cc0011 DISABLE_DUAL_QUAD=1
 
 GL 的 A1/A2 不变；release 构建通过。
 
+## 4.1 内核投递验证（2026-10-18 23:14，已重启）
+
+安装本分支 kext 到 EFI 并重启后，直接读取已加载的 Metal 驱动代码页：
+
+```text
+gate  +0x5c164: 75 0b        # 原始指令，未被 gate patch
+setz  +0x5c198: 0f 94 c0     # 原始指令，未被 allow patch
+hwInfo+0x9853e: 83 c9 4f     # 源头 patch 已生效
+```
+
+说明 NootedRed 页投递成功，且当前运行的是**源头版本**，不是 gate/setz 版本。
+
+行为与渲染：
+
+```text
+dual=0 control=00cc0010 disable=0  pixel 96,128,160,191 PASS
+dual=1 control=00cc0011 disable=1  pixel 128,160,192,223 PASS
+```
+
+无 GPU reset。source-level patch 已验证可替代 gate/setz 实现。
+
 ## 5. GL 为什么不能同样从源头修
 
 GL 的 `_glrAMD_GFX9_UpdateHwCbDualQuadMode` 与 Metal 不同：
