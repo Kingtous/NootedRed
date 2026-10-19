@@ -24,6 +24,7 @@
 #include <AppleGFXHDA.hpp>
 #include <Backlight.hpp>
 #include <DebugEnabler.hpp>
+#include <DeviceProfile.hpp>
 #include <DriverInjector.hpp>
 #include <GPUDriversAMD/ATOMBIOS.hpp>
 #include <GPUDriversAMD/CAIL/Result.hpp>
@@ -46,12 +47,24 @@
 #include <Regs/NBIO.hpp>
 #include <Regs/SMU.hpp>
 #include <UserPatches.hpp>
+#include <VCNBridge.hpp>
+#include <VDA.hpp>
 #include <X5000.hpp>
 #include <X6000FB.hpp>
 #include <kern/clock.h>
 #include <libkern/OSTypes.h>
 #include <libkern/c++/OSMetaClass.h>
 #include <mach/i386/vm_types.h>
+
+// Generated 15.8.1 user-space VDA patch tables.  They are produced by tools/gen_vda_*_data.py and are
+// committed with this branch; the VCN bridge itself does not depend on them, but VDA user-space patching
+// is a no-op if they are absent.
+#if __has_include(<VDAVAData.hpp>)
+#include <VDAVAData.hpp>
+#endif
+#if __has_include(<VDAGVAData.hpp>)
+#include <VDAGVAData.hpp>
+#endif
 
 static NRed moduleInstance;
 
@@ -67,7 +80,24 @@ void NRed::init()
 
     Backlight::singleton().init();
 
+#if __has_include(<VDAVAData.hpp>)
+    if constexpr (sizeof(VDAVAData::Patches) / sizeof(VDAVAData::Patches[0]) > 0) {
+        UserPatches::singleton().registerVDAFix(VDAVAData::Patches,
+                                                sizeof(VDAVAData::Patches) / sizeof(VDAVAData::Patches[0]));
+    }
+#endif
+#if __has_include(<VDAGVAData.hpp>)
+    if constexpr (sizeof(VDAGVAData::Patches) / sizeof(VDAGVAData::Patches[0]) > 0) {
+        UserPatches::singleton().registerVDAFix(VDAGVAData::Patches,
+                                                sizeof(VDAGVAData::Patches) / sizeof(VDAGVAData::Patches[0]));
+    }
+#endif
+
     UserPatches::singleton().init();
+
+    VDA::singleton().init();
+
+    VCNBridge::singleton().init();
 
     lilu.onKextLoadForce(&kextRadeonX6000Framebuffer);
     lilu.onKextLoadForce(&kextRadeonX5000HWLibs);
@@ -78,7 +108,7 @@ void NRed::init()
     lilu.onPatcherLoadForce(
         [](void* const, KernelPatcher& patcher)
         {
-            singleton().processPatcher();
+            singleton().processPatcher(patcher);
             DriverInjector::singleton().processPatcher(patcher);
             PenguinWizardry::RuntimeMCManager::singleton().processPatcher(patcher);
         },
@@ -95,6 +125,7 @@ void NRed::init()
             AppleGFXHDA::singleton().processKext(patcher, id, slide, size);
             X5000HWLibs::singleton().processKext(patcher, id, slide, size);
             X5000::singleton().processKext(patcher, id, slide, size);
+            VCNBridge::singleton().processKext(patcher, id, slide, size);
         },
         nullptr);
 }
@@ -149,7 +180,7 @@ void NRed::hwLateInit()
     DBGLOG("NRed", "enumRevision = 0x%X", this->enumRevision);
 }
 
-void NRed::processPatcher()
+void NRed::processPatcher(KernelPatcher& patcher)
 {
     const auto devInfo = DeviceInfo::create();
     assert(devInfo != nullptr);
@@ -171,6 +202,9 @@ void NRed::processPatcher()
     this->iGPU->setProperty("hda-gfx", hdaGfxBytes, sizeof(hdaGfxBytes));
 
     this->deviceID = static_cast<UInt16>(WIOKit::readPCIConfigValue(this->iGPU, WIOKit::kIOPCIConfigDeviceID));
+    // Legacy attribute mapping kept for the existing hardware paths (X5000/HWLibs).  The compatibility
+    // layer's source of truth for family and capability is DeviceProfile, which distinguishes Cezanne and
+    // Barcelo explicitly (see docs/Compatibility-Architecture.md).
     switch (this->deviceID) {
         case 0x15D8: {
             this->attributes.setPicasso();
@@ -192,20 +226,34 @@ void NRed::processPatcher()
     }
     this->pciRevision = static_cast<UInt8>(WIOKit::readPCIConfigValue(this->iGPU, WIOKit::kIOPCIConfigRevisionID));
 
+    // One canonical compatibility line per boot; it also publishes the facts as IORegistry properties so a
+    // user report is triageable without a custom build.
+    DeviceProfile::logCurrent();
+
     char name[128];
     for (size_t i = 0, ii = 0; i < devInfo->videoExternal.size(); i++) {
         auto device = OSDynamicCast(IOPCIDevice, devInfo->videoExternal[i].video);
         if (device == nullptr) { continue; }
+
+        this->externalVideo = true;
 
         snprintf(name, arrsize(name), "GFX%zu", ii++);
         WIOKit::renameDevice(device, name);
         WIOKit::awaitPublishing(device);
     }
 
+    VDA::singleton().processPatcher();
+    UserPatches::singleton().processPatcher(patcher);
+
     DeviceInfo::deleter(devInfo);
 }
 
-void NRed::setProp32(const char* const key, const UInt32 value) const { this->iGPU->setProperty(key, value, 32); }
+void NRed::setProp32(const char* const key, const UInt32 value) const
+{
+    if (this->iGPU == nullptr) { return; }
+
+    this->iGPU->setProperty(key, value, 32);
+}
 
 UInt32 NRed::readReg32(const UInt32 reg) const
 {

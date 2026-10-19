@@ -42,11 +42,13 @@ along with this work.  If not, see https://git.chefkiss.dev/ChefKiss/OpenKnowled
 
 ## Documentation
 
+- [Compatibility architecture](docs/Compatibility-Architecture.md) — multi-macOS × multi-APU design:
+  target identity vs hardware capability, verification ladder, manifest pipeline and milestones.
 - [Contributing to UserPatches](docs/CONTRIBUTING-USERPATCHES.md) — architecture, adding macOS builds,
   APU families, patch-data generation, resolver rules, and testing checklist.
 - [Chromium/Electron fix usage](docs/Chromium-Fix-Usage.md) — end-user installation and rollback.
 - [Device profile / media capability layer](docs/Device-Profile.md) — graphics + future VDA capability model.
-- [Platform data collector](tools/README-collect-platform-data.md) — collect a target machine's drivers, kexts, firmware and capabilities for new macOS/APU support.
+- [Compatibility data collector](tools/README-collect-compat-data.md) — collect a target machine's drivers, patch sites, VDA data and capabilities for new macOS/APU support.
 
 ## Build artifacts
 

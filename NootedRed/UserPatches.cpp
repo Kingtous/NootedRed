@@ -24,8 +24,12 @@
 #include <Headers/kern_mach.hpp>
 #include <Headers/kern_util.hpp>
 #include <DeviceProfile.hpp>
+#include <NRed.hpp>
 #include <PenguinWizardry/KernelVersion.hpp>
 #include <UserPatches.hpp>
+#include <TahoePatchData.hpp>
+#include <VCNBridge.hpp>
+#include <libkern/OSAtomic.h>
 #include <libkern/OSTypes.h>
 #include <mach/i386/vm_types.h>
 
@@ -34,8 +38,11 @@ static UserPatches moduleInstance;
 namespace
 {
 
-    const char* const kBootArgGLFix    = "-NRedGLFix";
-    const char* const kBootArgGLFixOff = "-NRedGLFixOff";
+    const char* const kBootArgGLFix            = "-NRedGLFix";
+    const char* const kBootArgGLFixOff         = "-NRedGLFixOff";
+    const char* const kBootArgGLFixResolve     = "-NRedGLFixResolve";
+    const char* const kBootArgGLFixResolveOnly = "-NRedGLFixResolveOnly";
+    const char* const kBootArgVDA              = "-NRedVDA";
 
     // The patch bytes and page images below are specific to one driver build, and the native backend hooks
     // code signing page validation, so this is opt-in until the table has been filled in and tested.
@@ -97,6 +104,40 @@ namespace
     #include "UserPatchesSequoia.inc"
     #include "UserPatchesTahoe.inc"
 
+    static const UInt8 kResolverMask32[] = {
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    };
+    static const UInt8 kResolverHwCtx[] = {
+        0xAC, 0x00, 0x00, 0x00, 0x41, 0x83, 0xF8, 0x13, 0x77, 0x45, 0xC7, 0x07, 0x8D, 0x00, 0x00, 0x00,
+        0xC7, 0x47, 0x78, 0x04, 0x00, 0x00, 0x00, 0xC5, 0xF8, 0x28, 0x05, 0x50, 0xFE, 0x0D, 0x00, 0xC5,
+    };
+    static const UInt8 kResolverDualCtx[] = {
+        0x88, 0xA0, 0x00, 0x00, 0x00, 0xD1, 0xE9, 0x83, 0xE1, 0x01, 0x8B, 0x83, 0x98, 0x13, 0x00, 0x00,
+        0x83, 0xE0, 0xFE, 0x09, 0xC8, 0x89, 0x83, 0x98, 0x13, 0x00, 0x00, 0x48, 0x8B, 0x8B, 0x68, 0x0D,
+    };
+    static const UInt8 kResolverGateCtx[] = {
+        0xFF, 0xFF, 0x48, 0x8B, 0x85, 0x28, 0xFE, 0xFF, 0xFF, 0xF6, 0x80, 0xA0, 0x00, 0x00, 0x00, 0x02,
+        0x75, 0x0B, 0x31, 0xC0, 0x4C, 0x8B, 0x9D, 0x80, 0xFE, 0xFF, 0xFF, 0xEB, 0x2C, 0x83, 0xBD, 0x70,
+    };
+    static const UInt8 kResolverSetzCtx[] = {
+        0xFF, 0x48, 0xBA, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x49, 0x85, 0x54, 0x03, 0x08,
+        0x0F, 0x94, 0xC0, 0x08, 0xC8, 0x4C, 0x8B, 0xB5, 0x88, 0xFE, 0xFF, 0xFF, 0x48, 0x8B, 0xB5, 0x50,
+    };
+
+    // Resolver fallback for the 15.8.1 GL/Metal sites.
+    static const UserPatches::SignaturePatch kResolverSignatures[] = {
+        {kResolverHwCtx, kResolverMask32, sizeof(kResolverHwCtx), 16, kGLDriverHwInfoReplace,
+         sizeof(kGLDriverHwInfoReplace), 0, 1, 0xE000},
+        {kResolverDualCtx, kResolverMask32, sizeof(kResolverDualCtx), 16, kGLDriverDualQuadReplace,
+         sizeof(kGLDriverDualQuadReplace), 0, 1, 0x8000},
+        {kResolverGateCtx, kResolverMask32, sizeof(kResolverGateCtx), 16, kMTLGateReplace,
+         sizeof(kMTLGateReplace), 0, 1, ~static_cast<UInt64>(0)},
+        {kResolverSetzCtx, kResolverMask32, sizeof(kResolverSetzCtx), 16, kMTLAllowReplace_Sequoia,
+         sizeof(kMTLAllowReplace_Sequoia), 0, 1, ~static_cast<UInt64>(0)},
+    };
+    constexpr size_t kResolverSignatureCount = arrsize(kResolverSignatures);
+
     static const UserPatches::PagePatch kGLDriverPatches_Sonoma[] = {
         {UserPatcher::FileSegment::SegmentTextText, kGLDriverHwInfoPage_Sonoma,    kGLDriverHwInfoFind,
          kGLDriverHwInfoReplace,                    sizeof(kGLDriverHwInfoFind),   0, 1},
@@ -133,6 +174,52 @@ namespace
     };
     constexpr size_t kGLDriverPatchCount_Tahoe = arrsize(kGLDriverPatches_Tahoe);
 
+    static const UserPatches::PagePatch* const kGLDriverPatches = kGLDriverPatches_Sequoia;
+    constexpr size_t kGLDriverPatchCount = kGLDriverPatchCount_Sequoia;
+
+    // macOS 26.7.1 (Darwin 25.6.0) GL driver.  The driver layout moved: _gfx9_HwInfoInitData is at
+    // 0xDF80 and _glrAMD_GFX9_UpdateHwCbDualQuadMode at 0x819E, so the 15.8.1 page images cannot match.
+    // Only the GL driver is covered here; the Metal 26.7.1 sites still need validation.
+    static const UserPatches::PagePatch kTahoeGLDriverPatches[] = {
+        {UserPatcher::FileSegment::SegmentTextText, kTahoeGLHwInfoPage,    kGLDriverHwInfoFind,
+         kGLDriverHwInfoReplace,                    sizeof(kGLDriverHwInfoFind),   0, 1},
+        {UserPatcher::FileSegment::SegmentTextText, kTahoeGLDualQuadPage,  kGLDriverDualQuadFind,
+         kGLDriverDualQuadReplace,                  sizeof(kGLDriverDualQuadFind), 1, 1},
+        // The Metal pipeline context moved the CB_COLOR_CONTROL boolean write to +0xE4; patch the
+        // direct boolean assignment (and edx,~1 -> or edx,1) rather than the old 15.8.1 gate/setz pair.
+        {UserPatcher::FileSegment::SegmentTextText, kTahoeMTLControlPage, kTahoeMTLDualQuadFind,
+         kTahoeMTLDualQuadReplace,                  sizeof(kTahoeMTLDualQuadFind), 0, 1},
+    };
+    constexpr size_t kTahoeGLDriverPatchCount = arrsize(kTahoeGLDriverPatches);
+
+    // Version/family-aware patch sets.  Add one entry per validated macOS build; the exact page images
+    // still gate every site, so a set from another build can never modify a mismatched driver page.
+    // `15.8.1` is Darwin 24.6.0 (macOS 15.8.1, build 24H32).
+    static const UserPatches::PatchSet kGLDriverPatchSets[] = {
+        // Family-specific entries first: all current gfx9 APUs share the same page data, but keeping
+        // them separate lets a future family diverge without changing the selection code.
+        {"15.8.1 / Renoir-family", PenguinWizardry::KernelVersion(24, 6), PenguinWizardry::KernelVersion(24, 6),
+         static_cast<UserPatches::ApuMask>(UserPatches::kApuRenoir | UserPatches::kApuRenoirE |
+                                           UserPatches::kApuGreenSardine),
+         kGLDriverPatches_Sequoia, kGLDriverPatchCount_Sequoia, kResolverSignatures, kResolverSignatureCount},
+        {"15.8.1 / Raven-family", PenguinWizardry::KernelVersion(24, 6), PenguinWizardry::KernelVersion(24, 6),
+         static_cast<UserPatches::ApuMask>(UserPatches::kApuRaven | UserPatches::kApuRaven2 |
+                                           UserPatches::kApuPicasso),
+         kGLDriverPatches_Sequoia, kGLDriverPatchCount_Sequoia, kResolverSignatures, kResolverSignatureCount},
+        // Generic fallback for the case where APU attributes are not populated yet.  It is deliberately
+        // last so a known family always wins.
+        {"15.8.1 / gfx9 APU fallback", PenguinWizardry::KernelVersion(24, 6),
+         PenguinWizardry::KernelVersion(24, 6), UserPatches::kApuAll, kGLDriverPatches_Sequoia,
+         kGLDriverPatchCount_Sequoia, kResolverSignatures, kResolverSignatureCount},
+        // macOS 26.7.1 (Darwin 25.6.0).  Exact page images make this a no-op on any other driver build.
+        {"26.7.1 / gfx9 APU", PenguinWizardry::KernelVersion(25, 6), PenguinWizardry::KernelVersion(25, 6),
+         UserPatches::kApuAll, kGLDriverPatches_Tahoe, kGLDriverPatchCount_Tahoe},
+        // macOS 14.x (Sonoma) fallback.
+        {"14.x / Sonoma gfx9 APU", PenguinWizardry::KernelVersion(23, 0), PenguinWizardry::KernelVersion(23, 99),
+         UserPatches::kApuAll, kGLDriverPatches_Sonoma, kGLDriverPatchCount_Sonoma},
+    };
+    constexpr size_t kGLDriverPatchSetCount = sizeof(kGLDriverPatchSets) / sizeof(kGLDriverPatchSets[0]);
+
 }    // namespace
 
 UserPatches& UserPatches::singleton() { return moduleInstance; }
@@ -140,69 +227,209 @@ UserPatches& UserPatches::singleton() { return moduleInstance; }
 void UserPatches::init()
 {
     // `registerGLDriverFix` may already have been called; do not overwrite a custom table then.
-    if (this->patches == nullptr && this->patchCount == 0) {
-        if (getKernelVersion() >= KernelVersion::Tahoe) {
-            SYSLOG("UserPatch", "Selecting macOS 26 (Tahoe) GL/Metal patch set");
-            this->patches    = kGLDriverPatches_Tahoe;
-            this->patchCount = kGLDriverPatchCount_Tahoe;
-        } else if (getKernelVersion() >= KernelVersion::Sequoia) {
-            SYSLOG("UserPatch", "Selecting macOS 15 (Sequoia) GL/Metal patch set");
-            this->patches    = kGLDriverPatches_Sequoia;
-            this->patchCount = kGLDriverPatchCount_Sequoia;
-        } else {
-            SYSLOG("UserPatch", "Selecting macOS 14 (Sonoma) GL/Metal patch set");
-            this->patches    = kGLDriverPatches_Sonoma;
-            this->patchCount = kGLDriverPatchCount_Sonoma;
-        }
+    if (this->patches == nullptr && this->patchCount == 0 && this->patchSets == nullptr) {
+        this->patchSets     = kGLDriverPatchSets;
+        this->patchSetCount = kGLDriverPatchSetCount;
     }
 
     this->enabled = kGLFixDefaultEnabled;
     if (checkKernelArgument(kBootArgGLFix)) { this->enabled = true; }
     if (checkKernelArgument(kBootArgGLFixOff)) { this->enabled = false; }
 
-    if (!this->enabled) {
-        DBGLOG("UserPatch", "User-space GL driver patches are disabled");
+    // The resolver is a GL-only fallback: it must never be active when the GL fix itself is off.
+    this->resolverOnly    = this->enabled && checkKernelArgument(kBootArgGLFixResolveOnly);
+    this->resolverEnabled = this->enabled
+                            && (this->resolverOnly || checkKernelArgument(kBootArgGLFixResolve));
+
+    this->vdaEnabled = checkKernelArgument(kBootArgVDA);
+
+    if (!this->enabled && !this->vdaEnabled) {
+        DBGLOG("UserPatch", "User-space driver patches are disabled");
         return;
     }
 
-    SYSLOG("UserPatch", "Enabling user-space GL driver patches (experimental)");
-
-    const auto error =
-        lilu.onPatcherLoad([](void* const, KernelPatcher& patcher) { singleton().processPatcher(patcher); }, nullptr);
-    SYSLOG_COND(error != LiluAPI::Error::NoError, "UserPatch", "Failed to register patcher load callback (%d)",
-                static_cast<int>(error));
+    if (this->enabled) {
+        SYSLOG("UserPatch", "Enabling user-space GL driver patches (experimental)");
+        if (this->resolverEnabled) {
+            SYSLOG("UserPatch", "Resolver fallback enabled%s", this->resolverOnly ? " (resolver-only QA mode)" : "");
+        }
+    }
+    if (this->vdaEnabled) { SYSLOG("UserPatch", "Enabling user-space VDA driver patches (experimental)"); }
 }
 
 void UserPatches::registerGLDriverFix(const PagePatch* const patchTable, const size_t count)
 {
     this->patches    = patchTable;
     this->patchCount = count;
+    this->patchSets  = nullptr;
+    this->patchSetCount = 0;
+}
+
+void UserPatches::registerPatchSets(const PatchSet* const sets, const size_t count)
+{
+    this->patchSets     = sets;
+    this->patchSetCount = count;
+    this->patches       = nullptr;
+    this->patchCount    = 0;
+}
+
+auto UserPatches::currentApuMask() const -> ApuMask
+{
+    const auto& attributes = NRed::singleton().getAttributes();
+
+    UInt8 mask = 0;
+    if (attributes.isRaven2()) { mask |= kApuRaven2; }
+    if (attributes.isPicasso()) { mask |= kApuPicasso; }
+    if (attributes.isRenoir()) { mask |= kApuRenoir; }
+    if (attributes.isRenoirE()) { mask |= kApuRenoirE; }
+    if (attributes.isGreenSardine()) { mask |= kApuGreenSardine; }
+
+    // NRed leaves the attributes empty for the base Raven (0x15DD); model that explicitly.  A zero
+    // device ID means NRed has not populated its device information yet, so return an unknown mask and
+    // let the selector use the generic fallback rather than guessing a family.
+    if (mask == 0) {
+        if (NRed::singleton().getDeviceID() == 0x15DD) { mask = kApuRaven; }
+        else if (NRed::singleton().getDeviceID() == 0) { return static_cast<ApuMask>(0); }
+    }
+
+    return static_cast<ApuMask>(mask);
+}
+
+void UserPatches::selectPatchSet()
+{
+    if (this->patches != nullptr || this->patchCount != 0) { return; }
+    if (this->patchSets == nullptr || this->patchSetCount == 0) { return; }
+
+    const auto version = currentKernelVersion();
+    const auto apus    = static_cast<UInt8>(this->currentApuMask());
+
+    for (size_t index = 0; index < this->patchSetCount; index++) {
+        const auto& set = this->patchSets[index];
+        if (version < set.minVersion || version > set.maxVersion) { continue; }
+
+        // An unknown APU (zero mask) may only use the generic fallback, never a family-specific set.
+        if (apus == 0) {
+            if (set.apus != UserPatches::kApuAll) { continue; }
+        }
+        else if ((static_cast<UInt8>(set.apus) & apus) == 0) {
+            continue;
+        }
+
+        this->patches        = set.patches;
+        this->patchCount     = set.count;
+        this->signatures     = set.signatures;
+        this->signatureCount = set.signatureCount;
+        SYSLOG("UserPatch", "Selected patch set \"%s\" for macOS %u.%u / APU mask 0x%02X", set.name,
+               version.major(), version.minor(), apus);
+        return;
+    }
+
+    SYSLOG("UserPatch", "No patch set matches macOS %u.%u / APU mask 0x%02X; trying major kernel version fallback",
+           version.major(), version.minor(), apus);
+
+    if (getKernelVersion() >= KernelVersion::Tahoe) {
+        SYSLOG("UserPatch", "Fallback: selecting macOS 26 (Tahoe) GL/Metal patch set");
+        this->patches    = kGLDriverPatches_Tahoe;
+        this->patchCount = kGLDriverPatchCount_Tahoe;
+    } else if (getKernelVersion() >= KernelVersion::Sequoia) {
+        SYSLOG("UserPatch", "Fallback: selecting macOS 15 (Sequoia) GL/Metal patch set");
+        this->patches    = kGLDriverPatches_Sequoia;
+        this->patchCount = kGLDriverPatchCount_Sequoia;
+        this->signatures = kResolverSignatures;
+        this->signatureCount = kResolverSignatureCount;
+    } else {
+        SYSLOG("UserPatch", "Fallback: selecting macOS 14 (Sonoma) GL/Metal patch set");
+        this->patches    = kGLDriverPatches_Sonoma;
+        this->patchCount = kGLDriverPatchCount_Sonoma;
+    }
+}
+
+void UserPatches::registerVDAFix(const PagePatch* const patchTable, const size_t count)
+{
+    if (patchTable == nullptr || count == 0) { return; }
+
+    if (this->vdaTableCount >= arrsize(this->vdaTables)) {
+        SYSLOG("UserPatch", "Too many VDA patch tables, ignoring the extra one");
+        return;
+    }
+
+    this->vdaTables[this->vdaTableCount++] = {patchTable, count};
 }
 
 void UserPatches::processPatcher(KernelPatcher& patcher)
 {
+    if (!this->enabled && !this->vdaEnabled) {
+        DBGLOG("UserPatch", "User-space driver patches are disabled");
+        return;
+    }
+
     const auto* const profile = DeviceProfile::current();
+    auto              glEnabled = this->enabled;
     if (profile != nullptr) {
-        SYSLOG("UserPatch", "Device profile: %s (family %s)", profile->name,
-               DeviceProfile::familyName(profile->family));
+        SYSLOG("UserPatch", "Device profile: %s (family %s, level %s)", profile->name,
+               DeviceProfile::familyName(profile->family), DeviceProfile::levelName(profile->level));
         if (!profile->graphics.conditionalDualQuad) {
             SYSLOG("UserPatch", "Graphics policy disables the conditional dual-quad fix for this profile");
-            return;
+            glEnabled = false;
         }
     }
 
-    if (this->patches == nullptr || this->patchCount == 0) {
+    // Pick the version/family-aware GL patch set before the native page list is built from it.
+    if (glEnabled) { this->selectPatchSet(); }
+
+    // The resolver is a fallback for the GL patch sites; honour the profile gate for it as well.
+    if (!glEnabled) {
+        this->resolverEnabled = false;
+        this->signatures      = nullptr;
+        this->signatureCount  = 0;
+    }
+
+    // Build the native page list from whichever tables are enabled.  The VDA tables only exist on macOS 11
+    // and newer, where the native backend is the one being used.  The profile is the single source of truth
+    // for the target: a VCN 2.x device whose profile enables the engine may receive the user-space VA tables
+    // (the VCN 2.x profiles, with 0x1638 as the validated target).
+    const auto vdaAllowed = this->vdaEnabled && profile != nullptr && profile->media.hasVCN0
+                            && profile->media.vcnGeneration == DeviceProfile::kVcn2_2
+                            && !NRed::singleton().hasExternalVideo();
+    if (this->vdaEnabled && !vdaAllowed) {
+        SYSLOG("UserPatch", "VDA patches requested but this profile does not enable the validated VCN 2.x target");
+    }
+
+    this->nativePatchCount = 0;
+    for (auto& isVDA : this->nativePatchIsVDA) { isVDA = false; }
+
+    if (currentKernelVersion() >= MACOS_11) {
+        auto append = [this](const PagePatch* const table, const size_t count, const bool vda)
+        {
+            for (size_t i = 0; i < count && this->nativePatchCount < kMaxNativePatches; ++i) {
+                this->nativePatchIsVDA[this->nativePatchCount] = vda;
+                this->nativePatches[this->nativePatchCount++]   = table[i];
+            }
+        };
+
+        if (glEnabled) { append(this->patches, this->patchCount, false); }
+        if (vdaAllowed) {
+            for (size_t i = 0; i < this->vdaTableCount; ++i) {
+                append(this->vdaTables[i].table, this->vdaTables[i].count, true);
+            }
+        }
+
+        if (this->nativePatchCount == 0) {
+            SYSLOG("UserPatch", "No user-space driver patches are configured, not installing any hooks");
+            return;
+        }
+
+        SYSLOG_COND(!this->installNativePagePatcher(patcher), "UserPatch",
+                    "Failed to install the native page patch backend");
+        return;
+    }
+
+    if (!glEnabled || this->patches == nullptr || this->patchCount == 0) {
         SYSLOG("UserPatch", "No user-space GL driver patches are configured, not installing any hooks");
         return;
     }
 
-    if (currentKernelVersion() >= MACOS_11) {
-        SYSLOG_COND(!this->installNativePagePatcher(patcher), "UserPatch",
-                    "Failed to install the native page patch backend");
-    }
-    else {
-        SYSLOG_COND(!this->installUserPatcher(), "UserPatch", "Failed to register Lilu's user patches");
-    }
+    SYSLOG_COND(!this->installUserPatcher(), "UserPatch", "Failed to register Lilu's user patches");
 }
 
 auto UserPatches::installUserPatcher() -> bool
@@ -289,84 +516,193 @@ auto UserPatches::buildNativePatches() -> bool
 {
     this->nativePageCount = 0;
 
-    for (size_t patchIndex = 0; patchIndex < this->patchCount; patchIndex++) {
-        const auto& patch = this->patches[patchIndex];
+    for (size_t patchIndex = 0; patchIndex < this->nativePatchCount; patchIndex++) {
+        const auto& patch = this->nativePatches[patchIndex];
 
-        if (patch.find == nullptr || patch.replace == nullptr || patch.size == 0 || patch.count == 0) { continue; }
-
-        if (patch.size > kMaxPatchSize) {
-            SYSLOG("UserPatch", "Patch %zu is larger than %zu bytes, skipping it", patchIndex, kMaxPatchSize);
-            continue;
+        if (patch.find == nullptr || patch.replace == nullptr || patch.size == 0 || patch.count == 0
+            || patch.page == nullptr || patch.size > kMaxPatchSize || patch.skip > kMaxSitesPerPage
+            || patch.count > kMaxSitesPerPage)
+        {
+            SYSLOG("UserPatch", "Patch %zu is invalid; refusing the native page table", patchIndex);
+            return false;
         }
 
-        if (patch.page == nullptr) {
-            SYSLOG("UserPatch", "Patch %zu has no page image, the native backend cannot apply it", patchIndex);
-            continue;
+        // Locate the complete set of sites before creating a page, so a truncated record can never leave a
+        // partially patched driver behind.
+        size_t offsets[kMaxSitesPerPage]{};
+        size_t matched = 0;
+        size_t placed  = 0;
+        for (size_t offset = 0; offset + patch.size <= kPageSize; offset++) {
+            if (memcmp(patch.page + offset, patch.find, patch.size) != 0) { continue; }
+
+            if (matched++ < patch.skip) { continue; }
+
+            offsets[placed++] = offset;
+            if (placed == patch.count) { break; }
+        }
+
+        if (placed != patch.count) {
+            SYSLOG("UserPatch",
+                   "Failed to locate all occurrences of patch %zu (%zu missing); refusing the native page table",
+                   patchIndex, patch.count - placed);
+            return false;
         }
 
         NativePage* page{nullptr};
         for (size_t pageIndex = 0; pageIndex < this->nativePageCount; pageIndex++) {
-            if (this->nativePages[pageIndex].image != patch.page) { continue; }
+            if (memcmp(this->nativePages[pageIndex].image, patch.page, kPageSize) != 0) { continue; }
             page = &this->nativePages[pageIndex];
             break;
         }
 
         if (page == nullptr) {
             if (this->nativePageCount >= kMaxNativePages) {
-                SYSLOG("UserPatch", "Too many distinct pages, only the first %zu are used", kMaxNativePages);
-                break;
+                SYSLOG("UserPatch",
+                       "Too many distinct pages for the native backend (%zu); refusing the native page table",
+                       kMaxNativePages);
+                return false;
             }
 
-            page        = &this->nativePages[this->nativePageCount++];
+            page = &this->nativePages[this->nativePageCount++];
+            *page = NativePage{};
             page->image = patch.page;
+            memcpy(&page->head, patch.page, sizeof(page->head));
         }
 
-        auto skip  = patch.skip;
-        auto count = patch.count;
+        if (page->siteCount + patch.count > kMaxSitesPerPage) {
+            SYSLOG("UserPatch",
+                   "Too many patch sites on a single page (%zu + %zu > %zu); refusing the native page table",
+                   page->siteCount, patch.count, kMaxSitesPerPage);
+            return false;
+        }
 
-        for (size_t offset = 0; offset + patch.size <= kPageSize; offset++) {
-            if (memcmp(patch.page + offset, patch.find, patch.size) != 0) { continue; }
-
-            if (skip != 0) {
-                skip--;
-                continue;
-            }
-
-            if (page->siteCount >= kMaxSitesPerPage) {
-                SYSLOG("UserPatch", "Too many patch sites on a single page, only the first %zu are used",
-                       kMaxSitesPerPage);
-                break;
-            }
-
+        page->vda = page->vda || this->nativePatchIsVDA[patchIndex];
+        for (size_t siteIndex = 0; siteIndex < patch.count; siteIndex++) {
             auto& site   = page->sites[page->siteCount++];
-            site.offset  = offset;
+            site.offset  = offsets[siteIndex];
             site.find    = patch.find;
             site.replace = patch.replace;
             site.size    = patch.size;
-
-            if (--count == 0) { break; }
         }
-
-        SYSLOG_COND(count != 0, "UserPatch", "Failed to locate all occurrences of patch %zu (%zu missing)", patchIndex,
-                    count);
     }
 
     if (this->nativePageCount == 0) {
-        SYSLOG("UserPatch", "No usable native page patches, each patch needs a %zu byte page image", kPageSize);
+        SYSLOG("UserPatch", "No usable native page patches, each patch needs a 4096 byte page image and a valid site");
         return false;
     }
 
     return true;
 }
 
-void UserPatches::patchNativePage(const void* const data)
+auto UserPatches::isPatchedPage(const NativePage& page, const UInt8* const data) const -> bool
+{
+    if (page.image == nullptr || data == nullptr) { return false; }
+
+    for (size_t offset = 0; offset < kPageSize; offset++) {
+        const NativeSite* site{nullptr};
+        for (size_t siteIndex = 0; siteIndex < page.siteCount; siteIndex++) {
+            const auto& candidate = page.sites[siteIndex];
+            if (offset >= candidate.offset && offset < candidate.offset + candidate.size) {
+                site = &candidate;
+                break;
+            }
+        }
+
+        if (site != nullptr) {
+            if (data[offset] != site->replace[offset - site->offset]) { return false; }
+        }
+        else if (data[offset] != page.image[offset]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void UserPatches::patchSignaturePage(const void* const data, const UInt64 pageOffset)
+{
+    if (!this->resolverEnabled || this->signatures == nullptr || this->signatureCount == 0 || data == nullptr) {
+        return;
+    }
+
+    const auto* const bytes = static_cast<const UInt8*>(data);
+
+    for (size_t signatureIndex = 0; signatureIndex < this->signatureCount; signatureIndex++) {
+        const auto& signature = this->signatures[signatureIndex];
+
+        if (signature.context == nullptr || signature.mask == nullptr || signature.replace == nullptr) { continue; }
+        if (signature.contextSize == 0 || signature.contextSize > kPageSize) { continue; }
+        if (signature.patchOffset + signature.replaceSize > signature.contextSize) { continue; }
+        if (signature.pageOffset != ~static_cast<UInt64>(0) && signature.pageOffset != pageOffset) { continue; }
+
+        auto skip  = signature.skip;
+        auto count = signature.count;
+
+        for (size_t offset = 0; offset + signature.contextSize <= kPageSize; offset++) {
+            bool matches = true;
+            for (size_t index = 0; index < signature.contextSize; index++) {
+                if ((bytes[offset + index] & signature.mask[index])
+                    != (signature.context[index] & signature.mask[index]))
+                {
+                    matches = false;
+                    break;
+                }
+            }
+            if (!matches) { continue; }
+
+            if (skip != 0) {
+                skip--;
+                continue;
+            }
+
+            if (MachInfo::setKernelWriting(true, KernelPatcher::kernelWriteLock) != KERN_SUCCESS) {
+                SYSLOG("UserPatch", "Resolver: failed to disable kernel write protection");
+                return;
+            }
+
+            memcpy(const_cast<UInt8*>(bytes) + offset + signature.patchOffset, signature.replace,
+                   signature.replaceSize);
+
+            if (MachInfo::setKernelWriting(false, KernelPatcher::kernelWriteLock) != KERN_SUCCESS) {
+                SYSLOG("UserPatch", "Resolver: failed to restore kernel write protection");
+            }
+
+            SYSLOG("UserPatch", "Resolver patched a signature site at page offset 0x%zX", offset);
+
+            if (--count == 0) { break; }
+        }
+
+        DBGLOG("UserPatch", "Resolver: %zu site(s) still unmatched for signature %zu", count, signatureIndex);
+    }
+}
+
+void UserPatches::patchNativePage(const void* const data, const UInt64 pageOffset)
 {
     if (data == nullptr) { return; }
+
+    // Test mode: bypass the safe exact-page path and exercise the resolver.  It is intentionally separated
+    // by a boot argument so it cannot be enabled by accident.
+    if (this->resolverOnly) {
+        this->patchSignaturePage(data, pageOffset);
+        return;
+    }
 
     for (size_t pageIndex = 0; pageIndex < this->nativePageCount; pageIndex++) {
         const auto& page = this->nativePages[pageIndex];
 
-        if (memcmp(page.image, data, kPageSize) != 0) { continue; }
+        // Cheap first-word fingerprint before the full 4 KiB compare: the validation hook runs for every
+        // code-signed page, so avoid 12 full-page memcmps for every page.
+        UInt64 head{0};
+        memcpy(&head, data, sizeof(head));
+        if (head != page.head || memcmp(page.image, data, kPageSize) != 0) { continue; }
+
+        // VDA patches are only applied when the VCN bridge actually prepared both drivers and loaded X6000.
+        // If it failed (ABI mismatch, X6000 load failure), the stock VA/GVA driver stays in place and decode
+        // falls back to software instead of trying to use a non-existing engine.
+        if (page.vda && !VCNBridge::singleton().loadReady()) {
+            DBGLOG("UserPatch", "VDA page matched but the VCN bridge is not ready; leaving it unpatched");
+            continue;
+        }
 
         // The page matches, so these checks can only fail when the table is inconsistent; never patch then.
         for (size_t siteIndex = 0; siteIndex < page.siteCount; siteIndex++) {
@@ -391,10 +727,24 @@ void UserPatches::patchNativePage(const void* const data)
             SYSLOG("UserPatch", "Failed to restore kernel write protection");
         }
 
-        DBGLOG("UserPatch", "Patched %zu site(s) in a user-space GL driver page", page.siteCount);
+        DBGLOG("UserPatch", "Patched %zu site(s) in a user-space driver page", page.siteCount);
+
+        if (page.vda) {
+            const auto applied = static_cast<UInt32>(OSIncrementAtomic(&this->vdaAppliedCount) + 1);
+            NRed::singleton().setProp32("NRedVCNUserApplied", applied);
+        }
 
         return;
     }
+
+    // The page may already contain our replacement bytes from an earlier validation (the page cache is
+    // shared).  Do not rescan it with the resolver; that would only produce false "signature not found"
+    // errors and unnecessary work.
+    for (size_t pageIndex = 0; pageIndex < this->nativePageCount; pageIndex++) {
+        if (this->isPatchedPage(this->nativePages[pageIndex], static_cast<const UInt8*>(data))) { return; }
+    }
+
+    this->patchSignaturePage(data, pageOffset);
 }
 
 void UserPatches::wrapCsValidatePage(void* const vnode, void* const pager, const UInt64 pageOffset,
@@ -404,7 +754,7 @@ void UserPatches::wrapCsValidatePage(void* const vnode, void* const pager, const
                                                                     nx);
 
     // Only patch pages that passed validation, so that a rejected page is never turned into a valid-looking one.
-    if (validated != nullptr && *validated != 0) { singleton().patchNativePage(data); }
+    if (validated != nullptr && *validated != 0) { singleton().patchNativePage(data, pageOffset); }
 }
 
 boolean_t UserPatches::wrapCsValidateRange(void* const vnode, void* const pager, const UInt64 pageOffset,
@@ -417,7 +767,7 @@ boolean_t UserPatches::wrapCsValidateRange(void* const vnode, void* const pager,
 
     const auto* const bytes = static_cast<const UInt8*>(data);
     for (size_t offset = 0; offset + kPageSize <= dataSize; offset += kPageSize) {
-        singleton().patchNativePage(bytes + offset);
+        singleton().patchNativePage(bytes + offset, pageOffset + offset);
     }
 
     return result;

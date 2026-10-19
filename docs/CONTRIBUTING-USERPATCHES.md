@@ -9,15 +9,18 @@ The normal kext build and coding conventions are in `AGENTS.md`; read that first
 
 ## Status and branches
 
-- `master`: the validated conditional gate/setz fix for macOS 15.8.1 / Renoir. It is the production
-  baseline.
-- `feature/multi-os-multi-apu`: version- and family-aware `PatchSet` table, APU masks, and the
-  `tools/gen_patch_data.py` generator. Only 15.8.1 data is included; other builds must be generated.
-- `research/patch-resolver`: opt-in masked-context resolver prototype. Exact page images remain the
-  primary path.
+- `master`: the integrated tree — version- and family-aware `PatchSet` selection, 15.8.1 and 26.7.1 page
+  data, the validated VDA/VCN module (default off) and the opt-in masked-context resolver. It is the
+  production baseline.
+- `feature/multi-os-multi-apu`, `feature/tahoe-26.7.1`, `feature/vda-hardware-decode`: merged into
+  `master`; kept for history.
+- `research/patch-resolver`: source of the resolver prototype now merged into `master` (see
+  [`analysis/patch-resolver.md`](../analysis/patch-resolver.md)); exact page images remain the primary
+  path.
+- `research/igpu-hwinfo-logic`: iGPU HwInfo/UBM research notes.
 
-Do not assume a branch's data applies to another macOS build. A mismatched page image is a no-op by
-design, not a fallback.
+Do not assume a set's data applies to another macOS build. A mismatched page image is a no-op by design,
+not a fallback; the resolver only runs when explicitly enabled and a miss is still a no-op.
 
 ## Architecture
 
@@ -89,7 +92,14 @@ Renoir, and produces black tiles/missing thumbnails.
 
 ## Adding a macOS build
 
-### 1. Use a pristine driver
+### 1. Collect the machine first
+
+Run [`tools/collect_compat_data.py`](../tools/README-collect-compat-data.md) on the target machine. It
+records the driver images, the candidate patch sites (`chromium/sites.json`) and the media/VDA data, and
+it warns when NootedRed has already patched the page cache. For generation data, use a pristine boot
+(`-NRedOff` or without NootedRed).
+
+### 2. Use a pristine driver
 
 Generate data from the target build's **unmodified** driver and dyld shared cache. If a driver page was
 already patched (for example by an earlier experiment), `gen_patch_data.py` will correctly fail its
@@ -158,7 +168,8 @@ Add the generated arrays and tables to `NootedRed/UserPatches.cpp`, then add the
 ```sh
 xmake f -m release -y
 xmake -y
-python3 tools/test_patchset_selection.py
+python3 tools/test_patchset_selection.py   # version/APU selection table
+python3 tools/test_patch_data.py           # page images, find/replace and resolver signature consistency
 ```
 
 Then install the kext, reboot, and check:
@@ -174,13 +185,14 @@ Then install the kext, reboot, and check:
 2. Map device IDs/attributes in `UserPatches::currentApuMask()`.
 3. Add or update a `PatchSet` entry for that family. If the page data is shared, reuse the existing
    tables; if not, generate a family-specific set.
-4. Add cases to `tools/test_patchset_selection.py`.
+4. Add cases to `tools/test_patchset_selection.py` and, if the APU needs its own patch data, make sure
+   `tools/test_patch_data.py` still passes.
 5. Test on the real hardware. A code-level mask is not a claim of hardware validation.
 
 Base Raven is special: `NRed` intentionally leaves `Attributes` empty for `0x15DD`, so
 `currentApuMask()` maps that device ID to `kApuRaven` explicitly.
 
-## Resolver prototype
+## Resolver fallback
 
 The resolver is an opt-in fallback for builds whose page image is not known. It is a short masked
 context around the patch site:
@@ -202,7 +214,8 @@ struct SignaturePatch {
 Rules:
 
 - exact page images are tried first;
-- resolver runs only with `-NRedGLFixResolve`;
+- resolver runs only with `-NRedGLFixResolve` (QA testing can use `-NRedGLFixResolveOnly` to bypass the
+  exact-page path and exercise the resolver on its own);
 - a miss is a no-op;
 - the current 15.8.1 signatures are 32-byte contexts generated from the same page images;
 - MTL signatures currently have no module filter; do not treat them as safe for arbitrary pages.
@@ -230,8 +243,11 @@ semantic correctness.
 
 ## Known limitations
 
-- The framework can select versions/families, but only 15.8.1 page data is present.
-- Multi-APU family entries share 15.8.1 data; only Renoir has been validated.
-- The resolver is a prototype; its 32-byte contexts are still per-build data.
+- The framework can select versions/families; 15.8.1 and 26.7.1 page data are present.
+- Multi-APU family entries share 15.8.1 data; only Renoir has been validated. The VDA engine is enabled in
+  the profile for every VCN 2.x APU (`0x1636`/`0x1638`/`0x164C`/`0x15E7`), but only `0x1638` is
+  hardware-validated; VCN 1.x APUs have no media path yet.
+- The resolver is merged but still prototype-grade: its 32-byte contexts are per-build data and the MTL
+  signatures lack module filtering (hardening is Milestone 3 of the compatibility architecture).
 - Full RB+ enablement is not safe on Renoir with isolated HwInfo/golden patches; keep the conditional
   gate/setz path.

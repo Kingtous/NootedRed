@@ -26,9 +26,16 @@
 
 // A single source of truth for per-device graphics and media capabilities.
 //
+// This is the hardware half of the compatibility model described in docs/Compatibility-Architecture.md:
+// the other half is the identity of the Apple binary being patched.  A profile answers "what can this APU
+// do" (graphics policy, media policy, validation level); it deliberately does not contain patch bytes or
+// per macOS build data, so adding an APU never duplicates patch data and adding a macOS build never
+// duplicates hardware facts.
+//
 // Graphics uses this profile to decide whether the Chromium dual-quad policy should be installed.
-// Media is intentionally a placeholder for future VCN/UVD/VDA support: the fields default to disabled,
-// so adding a media engine later does not require a second device-selection path.
+// Media describes the VCN/UVD/VDA capabilities of the device (generation, firmware, ring sizes, decode
+// formats).  Engine enablement flags stay false unless the profile is hardware-validated, so populating
+// the media data does not change behaviour or require a second device-selection path.
 class DeviceProfile
 {
 public:
@@ -40,6 +47,17 @@ public:
         kRenoir,
         kRenoirE,
         kGreenSardine,
+        kCezanne,
+        kBarcelo,
+    };
+
+    // Coarse validation roll-up for a profile.  The authoritative per-feature level is generated from the
+    // compatibility manifest (docs/Compatibility-Architecture.md, Milestone 4); until then this only
+    // controls logging and diagnostics.
+    enum SupportLevel : UInt8 {
+        kUnavailable = 0,
+        kExperimental,
+        kValidated,
     };
 
     struct GraphicsPolicy
@@ -49,37 +67,86 @@ public:
 
         // Whether the existing HwInfo/CU corrections for this family should be applied.
         bool correctHwInfo{true};
+
+        // Whether the APU is allowed to use RB+ at all.  This is the capability the conditional dual-quad
+        // policy consults; it is logged today and becomes a patch-site precondition once the target identity
+        // layer lands.  Mesa's predicate: Stoney/Vega12/Raven/Raven2/Renoir or gfx10.3+.
+        bool rbPlusAllowed{true};
+
+        // Shader-engine count written by the GL HwInfo correction.  The site lives in the driver binary
+        // (version axis); the value is an APU fact, so it must never be baked into the page image.
+        UInt8 numShaderEngines{1};
+    };
+
+    // VCN IP generation, encoded as major << 8 | minor so it can double as the `ipVersion` handed to the
+    // firmware loader.  Raven/Picasso/Raven2 are VCN 1.0-class, Renoir/Cezanne/Barcelo are VCN 2.2.
+    enum VcnGeneration : UInt32 {
+        kVcnNone = 0,
+        kVcn1_0 = 0x0100,
+        kVcn2_2 = 0x0202,
+    };
+
+    // Formats the VCN generation can decode.  Hardware capabilities, not enablement.
+    struct DecodeCaps
+    {
+        bool h264{false};
+        bool hevc{false};
+        bool av1{false};
     };
 
     struct MediaPolicy
     {
-        // Current NootedRed behaviour: all media engines are disabled.  These fields are the future
-        // VCN/UVD/VDA capability surface; keep them false until the engine init is implemented.
-        bool      hasUVD0{false};
-        bool      hasVCE{false};
-        bool      hasVCN0{false};
-        UInt8     vcnGeneration{0};
+        // Media engine enablement flags.  The VCN 2.x profiles enable VCN0 so the same VDA implementation
+        // can be tried on every VCN 2.x APU (0x1638 is hardware-validated, the others are experimental).
+        // VCN 1.x profiles keep the engine disabled because the X6000 VCN2 bridge cannot serve them.
+        bool hasUVD0{false};
+        bool hasVCE{false};
+        bool hasVCN0{false};
+
+        // VCN generation of this device.  kVcnNone means the media policy has no VCN data (fallback).
+        VcnGeneration vcnGeneration{kVcnNone};
+
+        // Name of the VCN firmware blob embedded by `HWLibs.cpp` (`Firmware/`), or nullptr.  The actual
+        // firmware load/PSP bring-up is a later phase; this only records which blob belongs to the device.
         const char* vcnFirmware{nullptr};
-        UInt32    vcnRingSize{0};
+
+        // Ring and fence allocation sizes for the future VCN submission path, in bytes.
+        UInt32 vcnRingSize{0};
+        UInt32 vcnFenceSize{0};
+
+        // Decode formats available on this VCN generation.
+        DecodeCaps decode{};
     };
 
     struct Profile
     {
-        const char*                     name;
-        UInt16                          deviceID;
-        ApuFamily                       family;
-        PenguinWizardry::KernelVersion  minVersion;
-        PenguinWizardry::KernelVersion  maxVersion;
-        GraphicsPolicy                  graphics;
-        MediaPolicy                     media;
+        const char*                    name;
+        UInt16                         deviceID;
+        ApuFamily                      family;
+        SupportLevel                   level;
+        PenguinWizardry::KernelVersion minVersion;
+        PenguinWizardry::KernelVersion maxVersion;
+        GraphicsPolicy                 graphics;
+        MediaPolicy                    media;
     };
 
-    // Returns the profile for the running device, or the generic fallback when the device is not known
-    // yet.  The fallback keeps the current graphics policy and disables all media engines.
+    // Returns the profile for the running device and kernel version, or the generic fallback when the
+    // device is not known.  The fallback keeps the current graphics policy and disables all media engines.
     static const Profile* current();
 
-    // Returns nullptr for an unsupported device ID.
+    // Returns nullptr for an unsupported device ID, ignoring the kernel version.
     static const Profile* forDevice(UInt16 deviceID);
 
+    // Returns nullptr when the device is unknown or the running kernel version is outside the profile's
+    // [minVersion, maxVersion] window.  The version window is metadata for now: per-build patch data is
+    // keyed by binary identity, not by this range.
+    static const Profile* forDevice(UInt16 deviceID, const PenguinWizardry::KernelVersion& version);
+
     static const char* familyName(ApuFamily family);
+
+    static const char* levelName(SupportLevel level);
+
+    // Emits the canonical per-boot compatibility line and publishes the same facts as IORegistry
+    // properties for field triage.  Called once from NRed::processPatcher() after device detection.
+    static void logCurrent();
 };
