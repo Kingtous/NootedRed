@@ -278,8 +278,8 @@ generated data were copied. **[I]**
 - **No new disablement of the Intel path**: mixed-GPU machines keep native behaviour.
 - **Unknowns**:
   - whether the page buffer handed to `_cs_validate_range` for the dyld shared cache is byte-identical
-    to the subcache file page embedded here (it should be: the generator verifies the page against the
-    `.02` file page, but the kernel-side validation path has not been observed at runtime);
+    to the subcache file page embedded here (confirmed at runtime: it is the file-backed cache page, and
+    the generator now recovers the stock page from `VDAGVAData.hpp` after a `-NRedVDA` boot);
   - whether `VTDecoderXPCService`/VideoToolbox on 15.8.1 uses `AVDGetGPUAccelerators` for the tested
     H.264/HEVC decode flows;
   - whether creating the AMD accelerator without an Intel accelerator succeeds end-to-end once

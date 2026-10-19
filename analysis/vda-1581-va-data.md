@@ -64,12 +64,14 @@ ones. All find sequences are unique per page with the selectors below. **[F]**
 | 1 | `AddrLibInitVegaToRV` | `VAAddrLibInterface::init(VAIOConnect*, sHardwareInfo*)` | `0x7FFB086083BE` | `0x7FFB08608449` (+0x8B) | `Page1` / `0x449` | `41 81 FC 8D 00 00 00` → `41 81 FC 8E 00 00 00` | high |
 | 2 | `ForceGfx9VideoProcessors` (3 sites) | `VAFactory::createColourFormatConverterVPEi`, `createDitheringVPEi`, `createDeblockerVPEi` | `0x7FFB0860F980`, `0x7FFB0860FA42`, `0x7FFB0860FAC4` | +0x7 each: `0xF987`, `0xFA49`, `0xFACB` | `Page2` / `0x987`, `0xA49`, `0xACB` | `8D 46 FF 83 F8 02 72 1F` → `8D 46 FF 83 F8 02 EB 1F` | high |
 | 3 | `ForceGfx9EngineAndBlt` (2 sites) | `VAFactory::createGraphicsEngine(VAContext*)`, `createImageBlt(VAContext*, unsigned)` | `0x7FFB0860FBC6`, `0x7FFB0860FC5E` | +0xA / +0xB: `0xFBD0`, `0xFC69` | `Page2` / `0xBD0`, `0xC69` | `48 8B 86 60 04 00 00 8B 40 0C 8D 48 FF 83` → `B8 02 00 00 00 90 90 90 90 90 8D 48 FF 83` | high |
-| 4 | `AddrLibCreateVegaToRV` | `Addr::Lib::Create(_ADDR_CREATE_INPUT const*, _ADDR_CREATE_OUTPUT*)` | `0x7FFB08667BB0` | `0x7FFB08667C65` (+0xB5) | `Page3` / `0xC65` | `3D 8D 00 00 00 0F 85` → `3D 8E 00 00 00 0F 85` | high |
-| 5 | `Gfx9ConvertChipFamilyVegaToRV` | `Addr::V2::Gfx9Lib::HwlConvertChipFamily(unsigned, unsigned)` | `0x7FFB0867D770` | +0x0 | `Page4` / `0x770` | `81 FE 8D 00 00 00 0F 85 88 00 00 00` → `81 FE 8E 00 00 00 0F 85 88 00 00 00` | medium |
+| 4 | `AddrLibCreateVegaToRV` | `Addr::Lib::Create(_ADDR_CREATE_INPUT const*, _ADDR_CREATE_OUTPUT*)` | `0x7FFB08667BB0` | `0x7FFB08667C65` (+0xB5) | `Page6` / `0xC65` | `3D 8D 00 00 00 0F 85` → `3D 8E 00 00 00 0F 85` | high |
+| 5 | `Gfx9ConvertChipFamilyVegaToRV` | `Addr::V2::Gfx9Lib::HwlConvertChipFamily(unsigned, unsigned)` | `0x7FFB0867D770` | +0x0 | `Page7` / `0x770` | `81 FE 8D 00 00 00 0F 85 88 00 00 00` → `81 FE 8E 00 00 00 0F 85 88 00 00 00` | medium |
+| 6 | `Vcn2EncCommandFeedbackStride` | `Vcn2EncCommand::getFeedbackSize()` | `0x7FFB0864DF84` | `0x7FFB0864DF88` (+0x4) | `Page3` / `0xF88` | `B8 A4 00 00 00 5D C3` → `B8 30 00 00 00 5D C3` | high (encode follow-up) |
+| 7 | `Vcn2AvcProcessEncodeStatusStride` | `AVDVcn2AvcEncDataProcessor::ProcessEncodeStatus(...)` | `0x7FFB0864F5FC` | `0x7FFB0864F626` (+0x2A) | `Page4` / `0x626` | `48 69 C0 A4 00 00 00` → `48 69 C0 30 00 00 00` | high (encode follow-up) |
+| 8 | `Vcn2HevcProcessEncodeStatusStride` | `AVDVcn2HevcEncDataProcessor::ProcessEncodeStatus(...)` | `0x7FFB08650802` | `0x7FFB0865082C` (+0x2A) | `Page5` / `0x82C` | `48 69 C0 A4 00 00 00` → `48 69 C0 30 00 00 00` | high (encode follow-up) |
 
-Totals: **6 patch records**, **5 page images**, **9 patched byte sites**, longest find 14 bytes.
-`UserPatches` must be extended to `kMaxNativePages >= 5`, `kMaxSitesPerPage >= 5` (page 2) and
-`kMaxPatchSize >= 14` before the table can be installed; the current backend limits are 4/4/32.
+Totals after the follow-up encode patches: **9 patch records**, **8 page images**, **12 patched byte sites** (the original 6 records/5 pages/9 sites plus three encode feedback-stride records on three new pages), longest find 14 bytes. The encode records are generated from the same 15.8.1 image and are listed separately in the generator.
+`UserPatches` must support at least 8 pages, 5 sites on one page and 14-byte find/replace for the VA table; combined with the AppleGVA and GL tables the native backend is configured for 12 pages / 16 sites / 32 bytes.
 
 ## 4. Per-patch evidence
 
@@ -291,7 +293,7 @@ VCN1 command translations are also irrelevant: this table drives native VCN2 har
   patch is applied, so a cache/driver update cannot be half-patched. The generated header also carries
   the cache UUID/base, image base, image UUID and `__text` SHA-256 (`SourceDescription`, `CacheUUID`,
   `TextSHA256`, `CacheBase`, `ImageBase`) so the integration can refuse a mismatched build.
-- Required backend limits: **5 pages**, **5 sites on one page**, **14-byte** find/replace.
+- Required backend limits: **8 pages**, **5 sites on one page**, **14-byte** find/replace for the VA table; the combined backend is configured for 16 pages / 16 sites / 32 bytes (12 pages are used today). The encode follow-up rows 6-8 live on pages 3-5; pages 0-2 are the original decode sites and pages 6-7 are the addrlib sites.
 - `VDAVAData.hpp` is fully generated; do not hand-edit. `python3 tools/gen_vda_va_data.py` rewrites it,
   `python3 tools/gen_vda_va_data.py --check` re-derives everything from the live cache, re-verifies
   every find in the exact page image and compares the committed table semantically.
