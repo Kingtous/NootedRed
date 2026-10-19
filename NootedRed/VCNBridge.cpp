@@ -48,10 +48,12 @@ namespace
 
     const char* const kBootArgVDA = "-NRedVDA";
 
-    // All generated data in this tree was derived from macOS 15.8.1 (24H32, Darwin 24.6.0).
+    // All generated data in this tree was derived from macOS 15.8.1 (24H32, Darwin 24.6.0)
+    // and macOS 14.8.9 (23J631, Darwin 23.6.0).
     bool isSupportedOS()
     {
-        return currentKernelVersion().major() == 24 && currentKernelVersion().minor() == 6;
+        return (currentKernelVersion().major() == 24 && currentKernelVersion().minor() == 6)
+            || (currentKernelVersion().major() == 23 && currentKernelVersion().minor() == 6);
     }
 
     // The build string is checked once the accelerator starts, not in NRed::init: the early kext-load
@@ -60,9 +62,14 @@ namespace
     {
         if (!isSupportedOS()) { return false; }
         // If the early-boot version string is not populated yet, the ABI guards are the remaining
-        // protection; once it is visible, require the exact 24H32 build.
+        // protection; once it is visible, require the exact validated build.
         if (osversion[0] == '\0') { return true; }
-        return strncmp(osversion, "24H32", 5) == 0;
+        if (currentKernelVersion().major() == 24) {
+            return strncmp(osversion, "24H32", 5) == 0;
+        } else if (currentKernelVersion().major() == 23) {
+            return strncmp(osversion, "23J631", 6) == 0;
+        }
+        return false;
     }
 
     bool isSupportedDevice()
@@ -171,7 +178,7 @@ void VCNBridge::init()
     }
 
     if (!isSupportedOS()) {
-        SYSLOG("VCN", "VCN data is for macOS 15.8.1 (Darwin 24.6); -NRedVDA is ignored on this build");
+        SYSLOG("VCN", "VCN data is for macOS 15.8.1 (Darwin 24.6) or 14.8.9 (Darwin 23.6); -NRedVDA is ignored on this build");
         this->requested = false;
         return;
     }
