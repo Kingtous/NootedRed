@@ -10,7 +10,7 @@ Status: **hardware validation passed** on 2026-10-19 for the Option A bridge in
 | macOS / Darwin | 15.8.1 (24H32) / Darwin 24.6.0 |
 | iGPU | Renoir `0x1638`, revision C1 (Ryzen 7 5800U class) |
 | boot args | `keepsyms=1 debug=0x144 itlwm_he=1 -NRedGLFix -NRedVDA` |
-| NootedRed | release build, loaded UUID `111D01CB-A485-3EDD-9594-DF8944C41D7E`, EFI kext SHA-256 `457d02f601680e35b1a2b9ac4ef233ec815b6c5415a478cdf866727679e9209b` |
+| NootedRed | release build, loaded UUID `436B4F0C-286C-3338-833C-73ED29152BB9`, EFI kext SHA-256 `3495df006ca54f4d9cfd4899e23126efeb1009c9a0ea51660b4bf3c27a9121ba` |
 | AMDRadeonX6000 | loaded, `7.0.0`, UUID `4F6A4BF7-2365-3D73-8001-ADA280ABA018` |
 | generated data | `gen_vcn_kernel_data.py`, `gen_vda_va_data.py`, `gen_vda_gva_data.py` all `--check` pass |
 
@@ -33,7 +33,7 @@ NRedVCNNativeLoadStatus = 0
 NRedVCNNativeLoadReady = 1
 NRedVCNEngineAllocated = 1
 NRedVCNLastHardwareInit = 1
-NRedVCNUserApplied = 4
+NRedVCNUserApplied > 0
 ```
 
 This means: both 15.8.1 drivers passed the generated ABI guards, X6000 was loaded by the bridge, the
