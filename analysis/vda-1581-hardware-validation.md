@@ -79,7 +79,11 @@ step; a repeated long-duration playback test was not run.
 - HEVC ffmpeg verbose logs do not expose `videotoolbox_vld`; hardware evidence there is the AppleGVA
   `useHighPerformanceDecode`/physical-accelerator log, not the ffmpeg pixel format line.
 - No Chromium/Electron or Safari playback test was run; only ffmpeg/VideoToolbox decode paths.
-- No 10-bit HEVC, DRM/Apple TV, or encode acceptance was run.
+- No 10-bit HEVC, DRM/Apple TV, or encode acceptance was run at the time of the first pass. A later
+  follow-up found that VideoToolbox hardware *encode* fails (`h264_videotoolbox`/`hevc_videotoolbox`
+  return -12704) and that VideoProc's hardware-info dialog consequently reports both codecs as unavailable.
+  Encode feedback-stride patches were added in a follow-up build (`cb98ebac…`) and are pending a reboot
+  test; decode was not changed by them.
 - The default-off path (`-NRedVDA` absent) with the final build has not been booted yet; the new code is
   gated at compile/run time and the earlier default boot before the final build was clean.
 - Only Renoir `0x1638` is enabled; other VCN 2.2 APUs and VCN 1.x remain unsupported.
