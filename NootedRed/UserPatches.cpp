@@ -868,10 +868,31 @@ static const UInt8 kGLDriverDualQuadPage[] = {
 };
 
     #include "UserPatchesSonoma.inc"
+    #include "UserPatchesTahoe.inc"
 
     // macOS 14 (Sonoma) Allow pattern: 0F 93 C0 (setae al) -> 31 C0 90 (xor eax,eax; nop)
     static const UInt8 kMTLAllowFind_Sonoma[]    = {0x0F, 0x93, 0xC0};
     static const UInt8 kMTLAllowReplace_Sonoma[] = {0x31, 0xC0, 0x90};
+
+    // macOS 26 (Tahoe) Gate: 74 28 (je +0x28) -> EB 00 (jmp +0x00, fallthrough / no-op jump)
+    static const UInt8 kMTLGateFind_Tahoe[]    = {0x74, 0x28};
+    static const UInt8 kMTLGateReplace_Tahoe[] = {0xEB, 0x00};
+
+    // macOS 26 (Tahoe) Allow pattern: 0F 94 C1 (sete cl) -> 31 C9 90 (xor ecx,ecx; nop)
+    static const UInt8 kMTLAllowFind_Tahoe[]    = {0x0F, 0x94, 0xC1};
+    static const UInt8 kMTLAllowReplace_Tahoe[] = {0x31, 0xC9, 0x90};
+
+    static const UserPatches::PagePatch kGLDriverPatches_Tahoe[] = {
+        {UserPatcher::FileSegment::SegmentTextText, kGLDriverHwInfoPage_Tahoe,    kGLDriverHwInfoFind,
+         kGLDriverHwInfoReplace,                    sizeof(kGLDriverHwInfoFind),   0, 1},
+        {UserPatcher::FileSegment::SegmentTextText, kGLDriverDualQuadPage_Tahoe,  kGLDriverDualQuadFind,
+         kGLDriverDualQuadReplace,                  sizeof(kGLDriverDualQuadFind), 1, 1},
+        {UserPatcher::FileSegment::SegmentTextText, kMTLControlPage_Tahoe,        kMTLGateFind_Tahoe,
+         kMTLGateReplace_Tahoe,                     sizeof(kMTLGateFind_Tahoe),    0, 1},
+        {UserPatcher::FileSegment::SegmentTextText, kMTLControlPage_Tahoe,        kMTLAllowFind_Tahoe,
+         kMTLAllowReplace_Tahoe,                    sizeof(kMTLAllowFind_Tahoe),   1, 1},
+    };
+    constexpr size_t kGLDriverPatchCount_Tahoe = arrsize(kGLDriverPatches_Tahoe);
 
     static const UserPatches::PagePatch kGLDriverPatches_Sonoma[] = {
         {UserPatcher::FileSegment::SegmentTextText, kGLDriverHwInfoPage_Sonoma,    kGLDriverHwInfoFind,
@@ -905,14 +926,18 @@ void UserPatches::init()
 {
     // `registerGLDriverFix` may already have been called; do not overwrite a custom table then.
     if (this->patches == nullptr && this->patchCount == 0) {
-        if (getKernelVersion() < KernelVersion::Sequoia) {
-            SYSLOG("UserPatch", "Selecting macOS 14 (Sonoma) GL/Metal patch set");
-            this->patches    = kGLDriverPatches_Sonoma;
-            this->patchCount = kGLDriverPatchCount_Sonoma;
-        } else {
+        if (getKernelVersion() >= KernelVersion::Tahoe) {
+            SYSLOG("UserPatch", "Selecting macOS 26 (Tahoe) GL/Metal patch set");
+            this->patches    = kGLDriverPatches_Tahoe;
+            this->patchCount = kGLDriverPatchCount_Tahoe;
+        } else if (getKernelVersion() >= KernelVersion::Sequoia) {
             SYSLOG("UserPatch", "Selecting macOS 15 (Sequoia) GL/Metal patch set");
             this->patches    = kGLDriverPatches;
             this->patchCount = kGLDriverPatchCount;
+        } else {
+            SYSLOG("UserPatch", "Selecting macOS 14 (Sonoma) GL/Metal patch set");
+            this->patches    = kGLDriverPatches_Sonoma;
+            this->patchCount = kGLDriverPatchCount_Sonoma;
         }
     }
 
