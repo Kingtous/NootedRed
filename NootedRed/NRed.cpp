@@ -59,8 +59,20 @@
 // Generated 15.8.1 user-space VDA patch tables.  They are produced by tools/gen_vda_*_data.py and are
 // committed with this branch; the VCN bridge itself does not depend on them, but VDA user-space patching
 // is a no-op if they are absent.
+#if __has_include(<VDAVADataSonoma.hpp>)
+#include <VDAVADataSonoma.hpp>
+#endif
+#if __has_include(<VDAVADataSequoia.hpp>)
+#include <VDAVADataSequoia.hpp>
+#endif
 #if __has_include(<VDAVAData.hpp>)
 #include <VDAVAData.hpp>
+#endif
+#if __has_include(<VDAGVADataSonoma.hpp>)
+#include <VDAGVADataSonoma.hpp>
+#endif
+#if __has_include(<VDAGVADataSequoia.hpp>)
+#include <VDAGVADataSequoia.hpp>
 #endif
 #if __has_include(<VDAGVAData.hpp>)
 #include <VDAGVAData.hpp>
@@ -80,18 +92,33 @@ void NRed::init()
 
     Backlight::singleton().init();
 
-#if __has_include(<VDAVAData.hpp>)
-    if constexpr (sizeof(VDAVAData::Patches) / sizeof(VDAVAData::Patches[0]) > 0) {
-        UserPatches::singleton().registerVDAFix(VDAVAData::Patches,
-                                                sizeof(VDAVAData::Patches) / sizeof(VDAVAData::Patches[0]));
-    }
+    if (getKernelVersion() == KernelVersion::Sonoma) {
+#if __has_include(<VDAVADataSonoma.hpp>)
+        if constexpr (arrsize(VDAVADataSonoma::Patches) > 0) {
+            UserPatches::singleton().registerVDAFix(VDAVADataSonoma::Patches,
+                                                    arrsize(VDAVADataSonoma::Patches));
+        }
 #endif
-#if __has_include(<VDAGVAData.hpp>)
-    if constexpr (sizeof(VDAGVAData::Patches) / sizeof(VDAGVAData::Patches[0]) > 0) {
-        UserPatches::singleton().registerVDAFix(VDAGVAData::Patches,
-                                                sizeof(VDAGVAData::Patches) / sizeof(VDAGVAData::Patches[0]));
-    }
+#if __has_include(<VDAGVADataSonoma.hpp>)
+        if constexpr (arrsize(VDAGVADataSonoma::Patches) > 0) {
+            UserPatches::singleton().registerVDAFix(VDAGVADataSonoma::Patches,
+                                                    arrsize(VDAGVADataSonoma::Patches));
+        }
 #endif
+    } else if (getKernelVersion() >= KernelVersion::Sequoia) {
+#if __has_include(<VDAVADataSequoia.hpp>)
+        if constexpr (arrsize(VDAVADataSequoia::Patches) > 0) {
+            UserPatches::singleton().registerVDAFix(VDAVADataSequoia::Patches,
+                                                    arrsize(VDAVADataSequoia::Patches));
+        }
+#endif
+#if __has_include(<VDAGVADataSequoia.hpp>)
+        if constexpr (arrsize(VDAGVADataSequoia::Patches) > 0) {
+            UserPatches::singleton().registerVDAFix(VDAGVADataSequoia::Patches,
+                                                    arrsize(VDAGVADataSequoia::Patches));
+        }
+#endif
+    }
 
     UserPatches::singleton().init();
 

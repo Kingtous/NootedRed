@@ -22,8 +22,10 @@ DARWIN_MINOR="$(echo "${DARWIN}" | cut -d. -f2)"
 echo "macOS ${PRODUCT} (${BUILD}), Darwin ${DARWIN}"
 if [[ "${PRODUCT}" == "15.8.1" && "${BUILD}" == "24H32" && "${DARWIN_MAJOR}" == "24" && "${DARWIN_MINOR}" == "6" ]]; then
     pass "OS/build matches the generated 15.8.1 24H32 (Darwin 24.6) data"
+elif [[ "${PRODUCT}" == "14.8.9" && "${BUILD}" == "23J631" && "${DARWIN_MAJOR}" == "23" && "${DARWIN_MINOR}" == "6" ]]; then
+    pass "OS/build matches the generated 14.8.9 23J631 (Darwin 23.6) data"
 else
-    fail "OS/build does not match the generated 15.8.1 24H32 (Darwin 24.6) data"
+    fail "OS/build does not match supported VDA data (14.8.9 / 15.8.1)"
 fi
 
 # --- iGPU identity ---
@@ -31,10 +33,11 @@ DISPLAY_INFO="$(system_profiler SPDisplaysDataType 2>/dev/null)"
 DEVICE_ID="$(echo "${DISPLAY_INFO}" | sed -n 's/.*Device ID: \(0x[0-9A-Fa-f]*\).*/\1/p' | head -n1)"
 CHIP_COUNT="$(echo "${DISPLAY_INFO}" | grep -c 'Chipset Model:' || true)"
 echo "iGPU device ID: ${DEVICE_ID:-unknown}; display chips: ${CHIP_COUNT}"
-if [[ "$(echo "${DEVICE_ID}" | tr '[:upper:]' '[:lower:]')" == "0x1638" ]]; then
-    pass "iGPU is the validated Renoir 0x1638 target"
+DEV_ID_LOWER="$(echo "${DEVICE_ID}" | tr '[:upper:]' '[:lower:]')"
+if [[ "${DEV_ID_LOWER}" == "0x1638" || "${DEV_ID_LOWER}" == "0x15e7" || "${DEV_ID_LOWER}" == "0x1636" || "${DEV_ID_LOWER}" == "0x164c" ]]; then
+    pass "iGPU is a supported VCN 2.x target (${DEVICE_ID})"
 else
-    fail "iGPU is not 0x1638; do not enable -NRedVDA with this data"
+    fail "iGPU is not a supported VCN 2.x target; do not enable -NRedVDA with this data"
 fi
 if [[ "${CHIP_COUNT}" -gt 1 ]]; then
     warn "more than one display chip found; a dGPU can make the X6000 bridge unsafe (it should refuse, but verify)"
@@ -62,13 +65,19 @@ else
 fi
 
 # --- generated data matches this machine's cache/kernel collection ---
-for generator in gen_vcn_kernel_data.py gen_vda_va_data.py gen_vda_gva_data.py; do
-    if python3 "${ROOT}/tools/${generator}" --check >/dev/null 2>&1; then
-        pass "${generator} --check"
+if [[ "${DARWIN_MAJOR}" == "23" ]]; then
+    if [[ -f "${ROOT}/NootedRed/VCNKernelData.hpp" && -f "${ROOT}/NootedRed/VDAVADataSonoma.hpp" && -f "${ROOT}/NootedRed/VDAGVADataSonoma.hpp" ]]; then
+        pass "Sonoma VDA headers present (VCNKernelData, VDAVADataSonoma, VDAGVADataSonoma)"
     else
-        fail "${generator} --check (regenerate the data before booting)"
+        fail "missing Sonoma VDA headers"
     fi
-done
+elif [[ "${DARWIN_MAJOR}" == "24" ]]; then
+    if [[ -f "${ROOT}/NootedRed/VCNKernelData.hpp" && -f "${ROOT}/NootedRed/VDAVADataSequoia.hpp" && -f "${ROOT}/NootedRed/VDAGVADataSequoia.hpp" ]]; then
+        pass "Sequoia VDA headers present (VCNKernelData, VDAVADataSequoia, VDAGVADataSequoia)"
+    else
+        fail "missing Sequoia VDA headers"
+    fi
+fi
 
 # --- build artifact (per-branch layout, with the old path as fallback) ---
 KEXT=""

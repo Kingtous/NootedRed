@@ -70,3 +70,4 @@ platform-data/
 Lilu
 MacKernelSDK
 *.zip
+__pycache__/

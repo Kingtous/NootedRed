@@ -28,6 +28,7 @@
 #pragma once
 
 #include <IOKit/IOTypes.h>
+#include <PenguinWizardry/KernelVersion.hpp>
 
 namespace VCNKernelData {
     struct CallPatch {
@@ -95,9 +96,132 @@ namespace VCNKernelData {
         { 0x3E8, "__ZN28AMDRadeonX6000_AMDRTHardware12enableGfxOffEv", nullptr, 0 },
     };
 
-    // Original bytes are `callq *slot(%rax)`; newSlot == 0 means the call is
-    // replaced by `call SignalSymbol` (E8 rel32) plus a NOP at runtime.
-    inline constexpr CallPatch CallPatches[] = {
+    // macOS 14 (Sonoma, Darwin 23.6) CallPatches
+    inline constexpr CallPatch CallPatches_Sonoma[] = {
+        {
+            "__ZN26AMDRadeonX6000_AMDHWEngine11waitForIdleEj",
+            0x1A,
+            { 0xFF, 0x90, 0xE0, 0x03, 0x00, 0x00 },
+            0x3E8,
+        },
+        {
+            "__ZN26AMDRadeonX6000_AMDHWEngine11waitForIdleEj",
+            0x84,
+            { 0xFF, 0x90, 0xE8, 0x03, 0x00, 0x00 },
+            0x3F0,
+        },
+        {
+            "__ZN27AMDRadeonX6000_AMDHWChannel11waitForIdleEj",
+            0x1A,
+            { 0xFF, 0x90, 0xE0, 0x03, 0x00, 0x00 },
+            0x3E8,
+        },
+        {
+            "__ZN27AMDRadeonX6000_AMDHWChannel11waitForIdleEj",
+            0xF2,
+            { 0xFF, 0x90, 0xE8, 0x03, 0x00, 0x00 },
+            0x3F0,
+        },
+        {
+            "__ZN27AMDRadeonX6000_AMDHWChannel14waitForHwStampEj",
+            0xB2,
+            { 0xFF, 0x90, 0xA0, 0x02, 0x00, 0x00 },
+            0x298,
+        },
+        {
+            "__ZN27AMDRadeonX6000_AMDHWChannel16timestampUpdatedEv",
+            0x1A,
+            { 0xFF, 0x90, 0xB0, 0x03, 0x00, 0x00 },
+            0x3B8,
+        },
+        {
+            "__ZN27AMDRadeonX6000_AMDHWChannel19submitCommandBufferEP30AMD_SUBMIT_COMMAND_BUFFER_INFO",
+            0x153,
+            { 0xFF, 0x90, 0x30, 0x02, 0x00, 0x00 },
+            0x0,
+        },
+        {
+            "__ZN27AMDRadeonX6000_AMDHWChannel20writeDiagnosisReportERPcRj",
+            0x538,
+            { 0xFF, 0x90, 0xB0, 0x03, 0x00, 0x00 },
+            0x3B8,
+        },
+        {
+            "__ZN27AMDRadeonX6000_AMDHWChannel20writeDiagnosisReportERPcRj",
+            0x7B6,
+            { 0xFF, 0x90, 0xB0, 0x03, 0x00, 0x00 },
+            0x3B8,
+        },
+        {
+            "__ZN27AMDRadeonX6000_AMDHWChannel20writeDiagnosisReportERPcRj",
+            0x9D1,
+            { 0xFF, 0x90, 0xC0, 0x03, 0x00, 0x00 },
+            0x3C8,
+        },
+        {
+            "__ZN27AMDRadeonX6000_AMDHWChannel24enableTimestampInterruptEv",
+            0x74,
+            { 0xFF, 0x90, 0xA0, 0x02, 0x00, 0x00 },
+            0x298,
+        },
+        {
+            "__ZN27AMDRadeonX6000_AMDHWChannel4initEiP30AMDRadeonX6000_IAMDHWInterfaceP27AMDRadeonX6000_IAMDHWEngineP25AMDRadeonX6000_IAMDHWRingPKc",
+            0x1F5,
+            { 0xFF, 0x90, 0xB0, 0x03, 0x00, 0x00 },
+            0x3B8,
+        },
+        {
+            "__ZN27AMDRadeonX6000_AMDHWChannel4initEiP30AMDRadeonX6000_IAMDHWInterfaceP27AMDRadeonX6000_IAMDHWEngineP25AMDRadeonX6000_IAMDHWRingPKc",
+            0x2AD,
+            { 0xFF, 0x90, 0xC0, 0x03, 0x00, 0x00 },
+            0x3C8,
+        },
+        {
+            "__ZN27AMDRadeonX6000_AMDHWChannel4initEiP30AMDRadeonX6000_IAMDHWInterfaceP27AMDRadeonX6000_IAMDHWEngineP25AMDRadeonX6000_IAMDHWRingPKc",
+            0x2CF,
+            { 0xFF, 0x90, 0xC0, 0x03, 0x00, 0x00 },
+            0x3C8,
+        },
+        {
+            "__ZN27AMDRadeonX6000_AMDHWChannel4initEiP30AMDRadeonX6000_IAMDHWInterfaceP27AMDRadeonX6000_IAMDHWEngineP25AMDRadeonX6000_IAMDHWRingPKc",
+            0x2F1,
+            { 0xFF, 0x90, 0xC0, 0x03, 0x00, 0x00 },
+            0x3C8,
+        },
+        {
+            "__ZN27AMDRadeonX6000_AMDHWChannel4initEiP30AMDRadeonX6000_IAMDHWInterfaceP27AMDRadeonX6000_IAMDHWEngineP25AMDRadeonX6000_IAMDHWRingPKc",
+            0x315,
+            { 0xFF, 0x90, 0xC0, 0x03, 0x00, 0x00 },
+            0x3C8,
+        },
+        {
+            "__ZN27AMDRadeonX6000_AMDHWChannel4initEiP30AMDRadeonX6000_IAMDHWInterfaceP27AMDRadeonX6000_IAMDHWEngineP25AMDRadeonX6000_IAMDHWRingPKc",
+            0x339,
+            { 0xFF, 0x90, 0xC0, 0x03, 0x00, 0x00 },
+            0x3C8,
+        },
+        {
+            "__ZN27AMDRadeonX6000_AMDHWChannel5resetEv",
+            0x5A,
+            { 0xFF, 0x90, 0xB0, 0x03, 0x00, 0x00 },
+            0x3B8,
+        },
+        {
+            "__ZN30AMDRadeonX6000_AMDVCN2HWEngine6isIdleEv",
+            0x33,
+            { 0xFF, 0x90, 0xA0, 0x02, 0x00, 0x00 },
+            0x298,
+        },
+        {
+            "__ZN36AMDRadeonX6000_AMDNavi10VideoContext21setSuspendResumeStateEb",
+            0x27,
+            { 0xFF, 0x90, 0xB0, 0x02, 0x00, 0x00 },
+            0x2A8,
+        },
+    };
+
+    // macOS 15 (Sequoia, Darwin 24.6) CallPatches
+    inline constexpr CallPatch CallPatches_Sequoia[] = {
         {
             "__ZN26AMDRadeonX6000_AMDHWEngine11waitForIdleEj",
             0x1A,
@@ -219,6 +343,18 @@ namespace VCNKernelData {
             0x2A8,
         },
     };
+
+    // Default CallPatches alias (points to Sequoia for compatibility)
+    inline constexpr auto& CallPatches = CallPatches_Sequoia;
+
+    inline const CallPatch* getCallPatches(size_t& count) {
+        if (getKernelVersion() == KernelVersion::Sonoma) {
+            count = sizeof(CallPatches_Sonoma) / sizeof(CallPatches_Sonoma[0]);
+            return CallPatches_Sonoma;
+        }
+        count = sizeof(CallPatches_Sequoia) / sizeof(CallPatches_Sequoia[0]);
+        return CallPatches_Sequoia;
+    }
 
     inline constexpr char SignalSymbol[] = "__ZN26AMDRadeonX6000_AMDHardware22signalGPUWorkSubmittedEv";
 

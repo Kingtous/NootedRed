@@ -553,12 +553,14 @@ void VCNBridge::processKext(KernelPatcher& patcher, const size_t id, const mach_
         }
 
         // Verify every generated call-site before touching any of them, then apply all-or-nothing.
-        mach_vm_address_t addresses[arrsize(VCNKernelData::CallPatches)]{};
+        size_t callPatchCount = 0;
+        const auto* const callPatches = VCNKernelData::getCallPatches(callPatchCount);
+        mach_vm_address_t addresses[arrsize(VCNKernelData::CallPatches_Sequoia)]{};
         mach_vm_address_t signal{0};
         if (!resolve(patcher, id, VCNKernelData::SignalSymbol, signal, slide, size)) { return; }
 
-        for (size_t i = 0; i < arrsize(VCNKernelData::CallPatches); ++i) {
-            const auto&       patch = VCNKernelData::CallPatches[i];
+        for (size_t i = 0; i < callPatchCount; ++i) {
+            const auto&       patch = callPatches[i];
             mach_vm_address_t function{0};
             if (!resolve(patcher, id, patch.symbol, function, slide, size)) { return; }
 
@@ -574,8 +576,8 @@ void VCNBridge::processKext(KernelPatcher& patcher, const size_t id, const mach_
 
         if (MachInfo::setKernelWriting(true, KernelPatcher::kernelWriteLock) != KERN_SUCCESS) { return; }
 
-        for (size_t i = 0; i < arrsize(VCNKernelData::CallPatches); ++i) {
-            const auto& patch = VCNKernelData::CallPatches[i];
+        for (size_t i = 0; i < callPatchCount; ++i) {
+            const auto& patch = callPatches[i];
             UInt8       replacement[6];
             memcpy(replacement, patch.original, sizeof(replacement));
             if (patch.newSlot != 0) { memcpy(replacement + 2, &patch.newSlot, sizeof(patch.newSlot)); }
@@ -601,9 +603,9 @@ void VCNBridge::processKext(KernelPatcher& patcher, const size_t id, const mach_
         if (!patcher.routeMultiple(id, routes, arrsize(routes), slide, size)) {
             patcher.clearError();
             if (MachInfo::setKernelWriting(true, KernelPatcher::kernelWriteLock) == KERN_SUCCESS) {
-                for (size_t i = 0; i < arrsize(VCNKernelData::CallPatches); ++i) {
-                    memcpy(reinterpret_cast<void*>(addresses[i]), VCNKernelData::CallPatches[i].original,
-                           sizeof(VCNKernelData::CallPatches[i].original));
+                for (size_t i = 0; i < callPatchCount; ++i) {
+                    memcpy(reinterpret_cast<void*>(addresses[i]), callPatches[i].original,
+                           sizeof(callPatches[i].original));
                 }
                 MachInfo::setKernelWriting(false, KernelPatcher::kernelWriteLock);
             }
@@ -617,6 +619,6 @@ void VCNBridge::processKext(KernelPatcher& patcher, const size_t id, const mach_
 
         this->x6000Prepared = true;
         NRed::singleton().setProp32("NRedVCNX6000ABIValidated", 1);
-        SYSLOG("VCN", "X6000 VCN bridge prepared (%zu call-site patches)", arrsize(VCNKernelData::CallPatches));
+        SYSLOG("VCN", "X6000 VCN bridge prepared (%zu call-site patches)", callPatchCount);
     }
 }

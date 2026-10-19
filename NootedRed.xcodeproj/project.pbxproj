@@ -834,7 +834,7 @@
 				CODE_SIGN_STYLE = Manual;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_TESTABILITY = YES;
-				GCC_C_LANGUAGE_STANDARD = c23;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_ENABLE_OBJC_EXCEPTIONS = NO;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = NO;
 				GCC_INLINES_ARE_PRIVATE_EXTERN = YES;
@@ -886,7 +886,8 @@
 					"-nostdlib",
 					"-Wall",
 					"-Wextra",
-					"-Wno-c23-extensions",
+					"-Wno-c2x-extensions",
+					"-Wno-c++11-narrowing",
 				);
 				RUN_CLANG_STATIC_ANALYZER = YES;
 				SDKROOT = macosx;
@@ -936,7 +937,7 @@
 				CODE_SIGN_STYLE = Manual;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				GCC_C_LANGUAGE_STANDARD = c23;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_ENABLE_OBJC_EXCEPTIONS = NO;
 				GCC_INLINES_ARE_PRIVATE_EXTERN = YES;
 				GCC_OPTIMIZATION_LEVEL = 3;
@@ -985,7 +986,8 @@
 					"-nostdlib",
 					"-Wall",
 					"-Wextra",
-					"-Wno-c23-extensions",
+					"-Wno-c2x-extensions",
+					"-Wno-c++11-narrowing",
 				);
 				RUN_CLANG_STATIC_ANALYZER = YES;
 				SDKROOT = macosx;
@@ -1077,7 +1079,7 @@
 				CODE_SIGN_STYLE = Manual;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				GCC_C_LANGUAGE_STANDARD = c23;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_ENABLE_OBJC_EXCEPTIONS = NO;
 				GCC_INLINES_ARE_PRIVATE_EXTERN = YES;
 				GCC_OPTIMIZATION_LEVEL = 3;
@@ -1129,7 +1131,8 @@
 					"-nostdlib",
 					"-Wall",
 					"-Wextra",
-					"-Wno-c23-extensions",
+					"-Wno-c2x-extensions",
+					"-Wno-c++11-narrowing",
 				);
 				RUN_CLANG_STATIC_ANALYZER = YES;
 				SDKROOT = macosx;
@@ -1201,7 +1204,7 @@
 				CODE_SIGN_STYLE = Manual;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_TESTABILITY = YES;
-				GCC_C_LANGUAGE_STANDARD = c23;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_ENABLE_OBJC_EXCEPTIONS = NO;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = NO;
 				GCC_INLINES_ARE_PRIVATE_EXTERN = YES;
@@ -1244,7 +1247,8 @@
 					"-nostdlib",
 					"-Wall",
 					"-Wextra",
-					"-Wno-c23-extensions",
+					"-Wno-c2x-extensions",
+					"-Wno-c++11-narrowing",
 				);
 				RUN_CLANG_STATIC_ANALYZER = YES;
 				SDKROOT = macosx;
