@@ -347,9 +347,10 @@ this work plus the media data from the VDA work).
     to the hardware-validated profile.
 - `CompatTarget` target-identity type and bounds-checked Mach-O `LC_UUID` parser
   (`NootedRed/CompatTarget.{hpp,cpp}`). Boot-time capture is deliberately **not** wired yet: the first
-  implementation read the driver file through the VFS during Lilu's patcher-load phase, which turned out to
-  be the only new early-boot side effect in the merged tree and is suspected of stalling boot, so it was
-  removed. Identity capture returns in Milestone 2 using in-memory page/vnode data.
+  implementation read the driver file through the VFS during Lilu's patcher-load phase, which was the only
+  new early-boot side effect in the merged tree and stalled boot on the target machine (confirmed by
+  removing it: the merged build then booted with both `-NRedGLFix` and `-NRedVDA`), so it was removed.
+  Identity capture returns in Milestone 2 using in-memory page/vnode data.
 - Canonical decision log + IORegistry properties (`DeviceProfile::logCurrent()`), emitted once after
   device detection.
 - No behaviour change: all existing profiles keep the same graphics policy and disabled media; the log
