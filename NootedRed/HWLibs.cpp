@@ -53,211 +53,211 @@
 #include <mach/kern_return.h>
 
 static const char ativvaxy_rv_dat[] = {
-#embed "Firmware/ativvaxy_rv.dat"
+#include "Firmware/ativvaxy_rv.dat.inc"
 };
 static const char ativvaxy_nv_dat[] = {
-#embed "Firmware/ativvaxy_nv.dat"
+#include "Firmware/ativvaxy_nv.dat.inc"
 };
 static const char atidmcub_rn_dat[] = {
-#embed "Firmware/atidmcub_rn.dat"
+#include "Firmware/atidmcub_rn.dat.inc"
 };
 
 static const char _dmcu_eram_dcn10_abm_2_1[] = {
-#embed "Firmware/dmcu_eram_dcn10_abm_2_1.bin"
+#include "Firmware/dmcu_eram_dcn10_abm_2_1.bin.inc"
 };
 DMCU_FW_CONSTANT(0x100, dmcu_eram_dcn10_abm_2_1);
 static const char _dmcu_eram_dcn10_abm_2_2[] = {
-#embed "Firmware/dmcu_eram_dcn10_abm_2_2.bin"
+#include "Firmware/dmcu_eram_dcn10_abm_2_2.bin.inc"
 };
 DMCU_FW_CONSTANT(0x100, dmcu_eram_dcn10_abm_2_2);
 static const char _dmcu_eram_dcn10_abm_2_3[] = {
-#embed "Firmware/dmcu_eram_dcn10_abm_2_3.bin"
+#include "Firmware/dmcu_eram_dcn10_abm_2_3.bin.inc"
 };
 DMCU_FW_CONSTANT(0x100, dmcu_eram_dcn10_abm_2_3);
 static const char _dmcu_eram_dcn21_abm_2_1[] = {
-#embed "Firmware/dmcu_eram_dcn21_abm_2_1.bin"
+#include "Firmware/dmcu_eram_dcn21_abm_2_1.bin.inc"
 };
 DMCU_FW_CONSTANT(0x100, dmcu_eram_dcn21_abm_2_1);
 static const char _dmcu_eram_dcn21_abm_2_2[] = {
-#embed "Firmware/dmcu_eram_dcn21_abm_2_2.bin"
+#include "Firmware/dmcu_eram_dcn21_abm_2_2.bin.inc"
 };
 DMCU_FW_CONSTANT(0x100, dmcu_eram_dcn21_abm_2_2);
 static const char _dmcu_eram_dcn21_abm_2_3[] = {
-#embed "Firmware/dmcu_eram_dcn21_abm_2_3.bin"
+#include "Firmware/dmcu_eram_dcn21_abm_2_3.bin.inc"
 };
 DMCU_FW_CONSTANT(0x100, dmcu_eram_dcn21_abm_2_3);
 static const char _dmcu_eram_dcn21_abm_2_4[] = {
-#embed "Firmware/dmcu_eram_dcn21_abm_2_4.bin"
+#include "Firmware/dmcu_eram_dcn21_abm_2_4.bin.inc"
 };
 DMCU_FW_CONSTANT(0x100, dmcu_eram_dcn21_abm_2_4);
 static const char _dmcu_intvectors_dcn10_abm_2_1[] = {
-#embed "Firmware/dmcu_intvectors_dcn10_abm_2_1.bin"
+#include "Firmware/dmcu_intvectors_dcn10_abm_2_1.bin.inc"
 };
 DMCU_FW_CONSTANT(0xFFE0, dmcu_intvectors_dcn10_abm_2_1);
 static const char _dmcu_intvectors_dcn10_abm_2_2[] = {
-#embed "Firmware/dmcu_intvectors_dcn10_abm_2_2.bin"
+#include "Firmware/dmcu_intvectors_dcn10_abm_2_2.bin.inc"
 };
 DMCU_FW_CONSTANT(0xFFE0, dmcu_intvectors_dcn10_abm_2_2);
 static const char _dmcu_intvectors_dcn10_abm_2_3[] = {
-#embed "Firmware/dmcu_intvectors_dcn10_abm_2_3.bin"
+#include "Firmware/dmcu_intvectors_dcn10_abm_2_3.bin.inc"
 };
 DMCU_FW_CONSTANT(0xFFE0, dmcu_intvectors_dcn10_abm_2_3);
 static const char _dmcu_intvectors_dcn21_abm_2_1[] = {
-#embed "Firmware/dmcu_intvectors_dcn21_abm_2_1.bin"
+#include "Firmware/dmcu_intvectors_dcn21_abm_2_1.bin.inc"
 };
 DMCU_FW_CONSTANT(0xFFE0, dmcu_intvectors_dcn21_abm_2_1);
 static const char _dmcu_intvectors_dcn21_abm_2_2[] = {
-#embed "Firmware/dmcu_intvectors_dcn21_abm_2_2.bin"
+#include "Firmware/dmcu_intvectors_dcn21_abm_2_2.bin.inc"
 };
 DMCU_FW_CONSTANT(0xFFE0, dmcu_intvectors_dcn21_abm_2_2);
 static const char _dmcu_intvectors_dcn21_abm_2_3[] = {
-#embed "Firmware/dmcu_intvectors_dcn21_abm_2_3.bin"
+#include "Firmware/dmcu_intvectors_dcn21_abm_2_3.bin.inc"
 };
 DMCU_FW_CONSTANT(0xFFE0, dmcu_intvectors_dcn21_abm_2_3);
 static const char _dmcu_intvectors_dcn21_abm_2_4[] = {
-#embed "Firmware/dmcu_intvectors_dcn21_abm_2_4.bin"
+#include "Firmware/dmcu_intvectors_dcn21_abm_2_4.bin.inc"
 };
 DMCU_FW_CONSTANT(0xFFE0, dmcu_intvectors_dcn21_abm_2_4);
 
 static const char _gc_9_1_ce_ucode[] = {
-#embed "Firmware/gc_9_1_ce_ucode.bin"
+#include "Firmware/gc_9_1_ce_ucode.bin.inc"
 };
 GC_FW_CONSTANT("#80", 0x36, 0x800, 0x60, 0x1, 0x0, gc_9_1_ce_ucode, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_1_me_ucode[] = {
-#embed "Firmware/gc_9_1_me_ucode.bin"
+#include "Firmware/gc_9_1_me_ucode.bin.inc"
 };
 GC_FW_CONSTANT("#167", 0x36, 0x1000, 0x60, 0x1, 0x0, gc_9_1_me_ucode, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_1_mec_jt_ucode[] = {
-#embed "Firmware/gc_9_1_mec_jt_ucode.bin"
+#include "Firmware/gc_9_1_mec_jt_ucode.bin.inc"
 };
 GC_FW_CONSTANT("#480", 0x36, 0x10000, 0x0, 0x1, 0x0, gc_9_1_mec_jt_ucode, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_1_mec_ucode[] = {
-#embed "Firmware/gc_9_1_mec_ucode.bin"
+#include "Firmware/gc_9_1_mec_ucode.bin.inc"
 };
 GC_FW_CONSTANT("#480", 0x36, 0x0, 0x0, 0x0, 0x0, gc_9_1_mec_ucode, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_1_pfp_ucode[] = {
-#embed "Firmware/gc_9_1_pfp_ucode.bin"
+#include "Firmware/gc_9_1_pfp_ucode.bin.inc"
 };
 GC_FW_CONSTANT("#196", 0x36, 0x1400, 0x60, 0x1, 0x0, gc_9_1_pfp_ucode, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_1_rlc_srlist_cntl[] = {
-#embed "Firmware/gc_9_1_rlc_srlist_cntl.bin"
+#include "Firmware/gc_9_1_rlc_srlist_cntl.bin.inc"
 };
 GC_FW_CONSTANT("#1", 0x1, 0x0, 0x0, 0x1, 0x0, gc_9_1_rlc_srlist_cntl, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_1_rlc_srlist_gpm_mem[] = {
-#embed "Firmware/gc_9_1_rlc_srlist_gpm_mem.bin"
+#include "Firmware/gc_9_1_rlc_srlist_gpm_mem.bin.inc"
 };
 GC_FW_CONSTANT("#1", 0x1, 0x0, 0x0, 0x1, 0x0, gc_9_1_rlc_srlist_gpm_mem, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_1_rlc_srlist_srm_mem[] = {
-#embed "Firmware/gc_9_1_rlc_srlist_srm_mem.bin"
+#include "Firmware/gc_9_1_rlc_srlist_srm_mem.bin.inc"
 };
 GC_FW_CONSTANT("#1", 0x1, 0x0, 0x0, 0x1, 0x0, gc_9_1_rlc_srlist_srm_mem, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_1_rlc_ucode[] = {
-#embed "Firmware/gc_9_1_rlc_ucode.bin"
+#include "Firmware/gc_9_1_rlc_ucode.bin.inc"
 };
 GC_FW_CONSTANT("#110", 0x1, 0x1000, 0x0, 0x1, 0x0, gc_9_1_rlc_ucode, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_1_rlc_ucode_a0[] = {
-#embed "Firmware/gc_9_1_rlc_ucode_a0.bin"
+#include "Firmware/gc_9_1_rlc_ucode_a0.bin.inc"
 };
 GC_FW_CONSTANT("#568", 0x1, 0x1000, 0x0, 0x1, 0x0, gc_9_1_rlc_ucode_a0, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_1_rlcv_ucode[] = {
-#embed "Firmware/gc_9_1_rlcv_ucode.bin"
+#include "Firmware/gc_9_1_rlcv_ucode.bin.inc"
 };
 GC_FW_CONSTANT("#28", 0x1, 0x800, 0x0, 0x1, 0x0, gc_9_1_rlcv_ucode, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_2_ce_ucode[] = {
-#embed "Firmware/gc_9_2_ce_ucode.bin"
+#include "Firmware/gc_9_2_ce_ucode.bin.inc"
 };
 GC_FW_CONSTANT("#80", 0x35, 0x800, 0x60, 0x1, 0x0, gc_9_2_ce_ucode, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_2_me_ucode[] = {
-#embed "Firmware/gc_9_2_me_ucode.bin"
+#include "Firmware/gc_9_2_me_ucode.bin.inc"
 };
 GC_FW_CONSTANT("#166", 0x35, 0x1000, 0x60, 0x1, 0x0, gc_9_2_me_ucode, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_2_mec_jt_ucode[] = {
-#embed "Firmware/gc_9_2_mec_jt_ucode.bin"
+#include "Firmware/gc_9_2_mec_jt_ucode.bin.inc"
 };
 GC_FW_CONSTANT("#480", 0x36, 0x0, 0x0, 0x1, 0x0, gc_9_2_mec_jt_ucode, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_2_mec_ucode[] = {
-#embed "Firmware/gc_9_2_mec_ucode.bin"
+#include "Firmware/gc_9_2_mec_ucode.bin.inc"
 };
 GC_FW_CONSTANT("#480", 0x36, 0x0, 0x0, 0x0, 0x0, gc_9_2_mec_ucode, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_2_pfp_ucode[] = {
-#embed "Firmware/gc_9_2_pfp_ucode.bin"
+#include "Firmware/gc_9_2_pfp_ucode.bin.inc"
 };
 GC_FW_CONSTANT("#196", 0x36, 0x1400, 0x60, 0x1, 0x0, gc_9_2_pfp_ucode, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_2_rlc_srlist_cntl[] = {
-#embed "Firmware/gc_9_2_rlc_srlist_cntl.bin"
+#include "Firmware/gc_9_2_rlc_srlist_cntl.bin.inc"
 };
 GC_FW_CONSTANT("#1", 0x1, 0x0, 0x0, 0x1, 0x0, gc_9_2_rlc_srlist_cntl, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_2_rlc_srlist_gpm_mem[] = {
-#embed "Firmware/gc_9_2_rlc_srlist_gpm_mem.bin"
+#include "Firmware/gc_9_2_rlc_srlist_gpm_mem.bin.inc"
 };
 GC_FW_CONSTANT("#1", 0x1, 0x0, 0x0, 0x1, 0x0, gc_9_2_rlc_srlist_gpm_mem, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_2_rlc_srlist_srm_mem[] = {
-#embed "Firmware/gc_9_2_rlc_srlist_srm_mem.bin"
+#include "Firmware/gc_9_2_rlc_srlist_srm_mem.bin.inc"
 };
 GC_FW_CONSTANT("#1", 0x1, 0x0, 0x0, 0x1, 0x0, gc_9_2_rlc_srlist_srm_mem, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_2_rlc_ucode[] = {
-#embed "Firmware/gc_9_2_rlc_ucode.bin"
+#include "Firmware/gc_9_2_rlc_ucode.bin.inc"
 };
 GC_FW_CONSTANT("#73", 0x1, 0x1000, 0x0, 0x1, 0x0, gc_9_2_rlc_ucode, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_2_rlcv_ucode[] = {
-#embed "Firmware/gc_9_2_rlcv_ucode.bin"
+#include "Firmware/gc_9_2_rlcv_ucode.bin.inc"
 };
 GC_FW_CONSTANT("#28", 0x1, 0x800, 0x0, 0x1, 0x0, gc_9_2_rlcv_ucode, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_3_ce_ucode[] = {
-#embed "Firmware/gc_9_3_ce_ucode.bin"
+#include "Firmware/gc_9_3_ce_ucode.bin.inc"
 };
 GC_FW_CONSTANT("#80", 0x36, 0x800, 0x60, 0x1, 0x0, gc_9_3_ce_ucode, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_3_me_ucode[] = {
-#embed "Firmware/gc_9_3_me_ucode.bin"
+#include "Firmware/gc_9_3_me_ucode.bin.inc"
 };
 GC_FW_CONSTANT("#167", 0x36, 0x1000, 0x60, 0x1, 0x0, gc_9_3_me_ucode, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_3_mec_jt_ucode[] = {
-#embed "Firmware/gc_9_3_mec_jt_ucode.bin"
+#include "Firmware/gc_9_3_mec_jt_ucode.bin.inc"
 };
 GC_FW_CONSTANT("#480", 0x36, 0x10000, 0x0, 0x1, 0x0, gc_9_3_mec_jt_ucode, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_3_mec_ucode[] = {
-#embed "Firmware/gc_9_3_mec_ucode.bin"
+#include "Firmware/gc_9_3_mec_ucode.bin.inc"
 };
 GC_FW_CONSTANT("#480", 0x36, 0x0, 0x0, 0x0, 0x0, gc_9_3_mec_ucode, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_3_pfp_ucode[] = {
-#embed "Firmware/gc_9_3_pfp_ucode.bin"
+#include "Firmware/gc_9_3_pfp_ucode.bin.inc"
 };
 GC_FW_CONSTANT("#196", 0x36, 0x1400, 0x60, 0x1, 0x0, gc_9_3_pfp_ucode, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_3_rlc_srlist_cntl[] = {
-#embed "Firmware/gc_9_3_rlc_srlist_cntl.bin"
+#include "Firmware/gc_9_3_rlc_srlist_cntl.bin.inc"
 };
 GC_FW_CONSTANT("#1", 0x1, 0x0, 0x0, 0x1, 0x0, gc_9_3_rlc_srlist_cntl, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_3_rlc_srlist_gpm_mem[] = {
-#embed "Firmware/gc_9_3_rlc_srlist_gpm_mem.bin"
+#include "Firmware/gc_9_3_rlc_srlist_gpm_mem.bin.inc"
 };
 GC_FW_CONSTANT("#1", 0x1, 0x0, 0x0, 0x1, 0x0, gc_9_3_rlc_srlist_gpm_mem, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_3_rlc_srlist_srm_mem[] = {
-#embed "Firmware/gc_9_3_rlc_srlist_srm_mem.bin"
+#include "Firmware/gc_9_3_rlc_srlist_srm_mem.bin.inc"
 };
 GC_FW_CONSTANT("#1", 0x1, 0x0, 0x0, 0x1, 0x0, gc_9_3_rlc_srlist_srm_mem, 0x0, 0x0, 0x0, 0x0);
 static const char _gc_9_3_rlc_ucode[] = {
-#embed "Firmware/gc_9_3_rlc_ucode.bin"
+#include "Firmware/gc_9_3_rlc_ucode.bin.inc"
 };
 GC_FW_CONSTANT("#60", 0x1, 0x1000, 0x0, 0x1, 0x0, gc_9_3_rlc_ucode, 0x0, 0x0, 0x0, 0x0);
 
 static const char psp_asd_bin[] = {
-#embed "Firmware/psp_asd.bin"
+#include "Firmware/psp_asd.bin.inc"
 };
 static const char psp_auc_bin[] = {
-#embed "Firmware/psp_auc.bin"
+#include "Firmware/psp_auc.bin.inc"
 };
 static const char psp_dtm_bin[] = {
-#embed "Firmware/psp_dtm.bin"
+#include "Firmware/psp_dtm.bin.inc"
 };
 static const char psp_fp_bin[] = {
-#embed "Firmware/psp_fp.bin"
+#include "Firmware/psp_fp.bin.inc"
 };
 static const char psp_hdcp_bin[] = {
-#embed "Firmware/psp_hdcp.bin"
+#include "Firmware/psp_hdcp.bin.inc"
 };
 
 static const char _sdma_4_1_ucode[] = {
-#embed "Firmware/sdma_4_1_ucode.bin"
+#include "Firmware/sdma_4_1_ucode.bin.inc"
 };
 SDMA_FW_CONSTANT("40", sdma_4_1_ucode, 0x29, 0x0, 0x0);
 

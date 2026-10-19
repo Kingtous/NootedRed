@@ -867,6 +867,24 @@ static const UInt8 kGLDriverDualQuadPage[] = {
     0x00, 0x3D, 0xF9, 0x88, 0x00, 0x00, 0x0F, 0x85, 0x97, 0x01, 0x00, 0x00, 0x45, 0x84, 0xD2, 0xB8,
 };
 
+    #include "UserPatchesSonoma.inc"
+
+    // macOS 14 (Sonoma) Allow pattern: 0F 93 C0 (setae al) -> 31 C0 90 (xor eax,eax; nop)
+    static const UInt8 kMTLAllowFind_Sonoma[]    = {0x0F, 0x93, 0xC0};
+    static const UInt8 kMTLAllowReplace_Sonoma[] = {0x31, 0xC0, 0x90};
+
+    static const UserPatches::PagePatch kGLDriverPatches_Sonoma[] = {
+        {UserPatcher::FileSegment::SegmentTextText, kGLDriverHwInfoPage_Sonoma,    kGLDriverHwInfoFind,
+         kGLDriverHwInfoReplace,                    sizeof(kGLDriverHwInfoFind),   0, 1},
+        {UserPatcher::FileSegment::SegmentTextText, kGLDriverDualQuadPage_Sonoma,  kGLDriverDualQuadFind,
+         kGLDriverDualQuadReplace,                  sizeof(kGLDriverDualQuadFind), 1, 1},
+        {UserPatcher::FileSegment::SegmentTextText, kMTLControlPage_Sonoma,        kMTLGateFind,
+         kMTLGateReplace,                           sizeof(kMTLGateFind),          0, 1},
+        {UserPatcher::FileSegment::SegmentTextText, kMTLControlPage_Sonoma,        kMTLAllowFind_Sonoma,
+         kMTLAllowReplace_Sonoma,                   sizeof(kMTLAllowFind_Sonoma),  0, 1},
+    };
+    constexpr size_t kGLDriverPatchCount_Sonoma = arrsize(kGLDriverPatches_Sonoma);
+
     static const UserPatches::PagePatch kGLDriverPatches[] = {
         {UserPatcher::FileSegment::SegmentTextText, kGLDriverHwInfoPage,    kGLDriverHwInfoFind,
          kGLDriverHwInfoReplace,                    sizeof(kGLDriverHwInfoFind),   0, 1},
@@ -887,8 +905,15 @@ void UserPatches::init()
 {
     // `registerGLDriverFix` may already have been called; do not overwrite a custom table then.
     if (this->patches == nullptr && this->patchCount == 0) {
-        this->patches    = kGLDriverPatches;
-        this->patchCount = kGLDriverPatchCount;
+        if (getKernelVersion() < KernelVersion::Sequoia) {
+            SYSLOG("UserPatch", "Selecting macOS 14 (Sonoma) GL/Metal patch set");
+            this->patches    = kGLDriverPatches_Sonoma;
+            this->patchCount = kGLDriverPatchCount_Sonoma;
+        } else {
+            SYSLOG("UserPatch", "Selecting macOS 15 (Sequoia) GL/Metal patch set");
+            this->patches    = kGLDriverPatches;
+            this->patchCount = kGLDriverPatchCount;
+        }
     }
 
     this->enabled = kGLFixDefaultEnabled;

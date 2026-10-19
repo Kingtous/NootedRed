@@ -33,16 +33,20 @@
 static DriverInjector moduleInstance;
 
 static const char com_apple_kext_AMDRadeonX5000[] = {
-#embed "Personalities/com.apple.kext.AMDRadeonX5000.xml" suffix(, '\0')
+#include "Personalities/com.apple.kext.AMDRadeonX5000.inc"
+, '\0'
 };
 static const char com_apple_kext_AMDRadeonX5000HWServices[] = {
-#embed "Personalities/com.apple.kext.AMDRadeonX5000HWServices.xml" suffix(, '\0')
+#include "Personalities/com.apple.kext.AMDRadeonX5000HWServices.inc"
+, '\0'
 };
 static const char com_apple_kext_AMDRadeonX6000Framebuffer[] = {
-#embed "Personalities/com.apple.kext.AMDRadeonX6000Framebuffer.xml" suffix(, '\0')
+#include "Personalities/com.apple.kext.AMDRadeonX6000Framebuffer.inc"
+, '\0'
 };
 static const char com_apple_driver_AppleGFXHDA[] = {
-#embed "Personalities/com.apple.driver.AppleGFXHDA.xml" suffix(, '\0')
+#include "Personalities/com.apple.driver.AppleGFXHDA.inc"
+, '\0'
 };
 
 DriverInjector::DriverInjector() :
