@@ -47,6 +47,7 @@ namespace
 {
 
     const char* const kBootArgVDA = "-NRedVDA";
+    const char* const kBootArgAVC = "-NRedAVC";
 
     // All generated data in this tree was derived from macOS 15.8.1 (24H32, Darwin 24.6.0)
     // and macOS 14.8.9 (23J631, Darwin 23.6.0).
@@ -171,14 +172,14 @@ VCNBridge& VCNBridge::singleton() { return moduleInstance; }
 
 void VCNBridge::init()
 {
-    this->requested = checkKernelArgument(kBootArgVDA);
+    this->requested = checkKernelArgument(kBootArgVDA) || checkKernelArgument(kBootArgAVC);
     if (!this->requested) {
-        DBGLOG("VCN", "VCN bridge is disabled; add -NRedVDA to opt in");
+        DBGLOG("VCN", "VCN bridge is disabled; add -NRedVDA or -NRedAVC to opt in");
         return;
     }
 
     if (!isSupportedOS()) {
-        SYSLOG("VCN", "VCN data is for macOS 15.8.1 (Darwin 24.6) or 14.8.9 (Darwin 23.6); -NRedVDA is ignored on this build");
+        SYSLOG("VCN", "VCN data is for macOS 15.8.1 (Darwin 24.6) or 14.8.9 (Darwin 23.6); hardware decode boot arg is ignored on this build");
         this->requested = false;
         return;
     }
