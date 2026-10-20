@@ -43,6 +43,7 @@ namespace
     const char* const kBootArgGLFixResolve     = "-NRedGLFixResolve";
     const char* const kBootArgGLFixResolveOnly = "-NRedGLFixResolveOnly";
     const char* const kBootArgVDA              = "-NRedVDA";
+    const char* const kBootArgAVC              = "-NRedAVC";
 
     // The patch bytes and page images below are specific to one driver build, and the native backend hooks
     // code signing page validation, so this is opt-in until the table has been filled in and tested.
@@ -241,7 +242,7 @@ void UserPatches::init()
     this->resolverEnabled = this->enabled
                             && (this->resolverOnly || checkKernelArgument(kBootArgGLFixResolve));
 
-    this->vdaEnabled = checkKernelArgument(kBootArgVDA);
+    this->vdaEnabled = checkKernelArgument(kBootArgVDA) || checkKernelArgument(kBootArgAVC);
 
     if (!this->enabled && !this->vdaEnabled) {
         DBGLOG("UserPatch", "User-space driver patches are disabled");
