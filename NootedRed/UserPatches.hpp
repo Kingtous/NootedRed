@@ -185,6 +185,7 @@ private:
         NativeSite   sites[kMaxSitesPerPage]{};
         size_t       siteCount{0};
         bool         vda{false};
+        bool         mismatchLogged{false};
     };
 
     const PatchSet* patchSets{nullptr};

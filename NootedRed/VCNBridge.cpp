@@ -30,6 +30,10 @@
 #include <NRed.hpp>
 #include <VCNBridge.hpp>
 #include <VCNKernelData.hpp>
+#if __has_include(<VCNKernelDataTahoe.hpp>)
+#include <VCNKernelDataTahoe.hpp>
+#define NRED_HAS_VCN_TAHOE 1
+#endif
 #include <VDA.hpp>
 #include <X5000.hpp>
 #include <PenguinWizardry/KernelVersion.hpp>
@@ -49,17 +53,23 @@ namespace
     const char* const kBootArgVDA = "-NRedVDA";
     const char* const kBootArgAVC = "-NRedAVC";
 
-    // All generated data in this tree was derived from macOS 15.8.1 (24H32, Darwin 24.6.0)
-    // and macOS 14.8.9 (23J631, Darwin 23.6.0).
+    // All generated data in this tree was derived from macOS 15.8.1 (24H32, Darwin 24.6.0),
+    // macOS 14.8.9 (23J631, Darwin 23.6.0) and macOS 26.7.1 (25G241, Darwin 25.6.0).
     bool isSupportedOS()
     {
-        return (currentKernelVersion().major() == 24 && currentKernelVersion().minor() == 6)
-            || (currentKernelVersion().major() == 23 && currentKernelVersion().minor() == 6);
+        if ((currentKernelVersion().major() == 24 && currentKernelVersion().minor() == 6)
+            || (currentKernelVersion().major() == 23 && currentKernelVersion().minor() == 6)) {
+            return true;
+        }
+#ifdef NRED_HAS_VCN_TAHOE
+        if (currentKernelVersion().major() == 25 && currentKernelVersion().minor() == 6) { return true; }
+#endif
+        return false;
     }
 
     // The build string is checked once the accelerator starts, not in NRed::init: the early kext-load
     // phase can run before `osversion` is populated, which would otherwise disable a valid bridge.
-    // Allow any patch/sub-build of the supported minor series (e.g. 14.8.x matches "23J", 15.8.x matches "24H").
+    // Allow any patch/sub-build of the supported minor series (e.g. 14.7.x matches "23H", 14.8.x matches "23J", 15.8.x matches "24H").
     bool isSupportedBuild()
     {
         if (!isSupportedOS()) { return false; }
@@ -69,9 +79,24 @@ namespace
         if (currentKernelVersion().major() == 24) {
             return strncmp(osversion, "24H", 3) == 0;
         } else if (currentKernelVersion().major() == 23) {
-            return strncmp(osversion, "23J", 3) == 0;
+            return strncmp(osversion, "23H", 3) == 0 || strncmp(osversion, "23J", 3) == 0 || strncmp(osversion, "23G", 3) == 0;
         }
+#ifdef NRED_HAS_VCN_TAHOE
+        else if (currentKernelVersion().major() == 25) {
+            return strncmp(osversion, "25G", 3) == 0;
+        }
+#endif
         return false;
+    }
+
+    // True when the Tahoe (Darwin 25) generated tables must be used instead of the legacy ones.
+    bool useTahoeVCNData()
+    {
+#ifdef NRED_HAS_VCN_TAHOE
+        return currentKernelVersion().major() == 25;
+#else
+        return false;
+#endif
     }
 
     bool isSupportedDevice()
@@ -126,10 +151,24 @@ namespace
     {
         if (size < 16 || slide > ~mach_vm_address_t{0} - size) { return false; }
 
-        const auto* const guards = old ? VCNKernelData::Guards5000 : VCNKernelData::Guards6000;
-        const auto        count  = old ? arrsize(VCNKernelData::Guards5000) : arrsize(VCNKernelData::Guards6000);
+        const VCNKernelData::SlotGuard* guards{nullptr};
+        const char*                     tableSymbol{nullptr};
+        size_t                          count{0};
+#ifdef NRED_HAS_VCN_TAHOE
+        if (useTahoeVCNData()) {
+            guards      = old ? VCNKernelDataTahoe::Guards5000 : VCNKernelDataTahoe::Guards6000;
+            count       = old ? arrsize(VCNKernelDataTahoe::Guards5000) : arrsize(VCNKernelDataTahoe::Guards6000);
+            tableSymbol = old ? VCNKernelDataTahoe::Table5000 : VCNKernelDataTahoe::Table6000;
+        } else
+#endif
+        {
+            guards      = old ? VCNKernelData::Guards5000 : VCNKernelData::Guards6000;
+            count       = old ? arrsize(VCNKernelData::Guards5000) : arrsize(VCNKernelData::Guards6000);
+            tableSymbol = old ? VCNKernelData::Table5000 : VCNKernelData::Table6000;
+        }
+
         mach_vm_address_t table{0};
-        if (!resolve(patcher, id, old ? VCNKernelData::Table5000 : VCNKernelData::Table6000, table, slide, size)) {
+        if (!resolve(patcher, id, tableSymbol, table, slide, size)) {
             return false;
         }
 
@@ -180,7 +219,7 @@ void VCNBridge::init()
     }
 
     if (!isSupportedOS()) {
-        SYSLOG("VCN", "VCN data is for macOS 15.8.1 (Darwin 24.6) or 14.8.9 (Darwin 23.6); hardware decode boot arg is ignored on this build");
+        SYSLOG("VCN", "VCN data is for macOS 14.x (Darwin 23.6), 15.x (Darwin 24.6) or 26.x (Darwin 25.6); hardware decode boot arg is ignored on this build");
         this->requested = false;
         return;
     }
@@ -562,11 +601,32 @@ void VCNBridge::processKext(KernelPatcher& patcher, const size_t id, const mach_
         }
 
         // Verify every generated call-site before touching any of them, then apply all-or-nothing.
-        size_t callPatchCount = 0;
-        const auto* const callPatches = VCNKernelData::getCallPatches(callPatchCount);
-        mach_vm_address_t addresses[arrsize(VCNKernelData::CallPatches_Sequoia)]{};
+        size_t                           callPatchCount = 0;
+        const VCNKernelData::CallPatch*  callPatches{nullptr};
+        const char*                      signalSymbol{nullptr};
+#ifdef NRED_HAS_VCN_TAHOE
+        if (useTahoeVCNData()) {
+            callPatches  = VCNKernelDataTahoe::getCallPatches(callPatchCount);
+            signalSymbol = VCNKernelDataTahoe::SignalSymbol;
+        } else
+#endif
+        {
+            callPatches  = VCNKernelData::getCallPatches(callPatchCount);
+            signalSymbol = VCNKernelData::SignalSymbol;
+        }
+        static constexpr size_t kMaxCallPatches = 32;
+        static_assert(arrsize(VCNKernelData::CallPatches_Sonoma) <= kMaxCallPatches);
+        static_assert(arrsize(VCNKernelData::CallPatches_Sequoia) <= kMaxCallPatches);
+#ifdef NRED_HAS_VCN_TAHOE
+        static_assert(arrsize(VCNKernelDataTahoe::CallPatches) <= kMaxCallPatches);
+#endif
+        if (callPatchCount == 0 || callPatchCount > kMaxCallPatches) {
+            SYSLOG("VCN", "unexpected generated call patch count %zu", callPatchCount);
+            return;
+        }
+        mach_vm_address_t addresses[kMaxCallPatches]{};
         mach_vm_address_t signal{0};
-        if (!resolve(patcher, id, VCNKernelData::SignalSymbol, signal, slide, size)) { return; }
+        if (!resolve(patcher, id, signalSymbol, signal, slide, size)) { return; }
 
         for (size_t i = 0; i < callPatchCount; ++i) {
             const auto&       patch = callPatches[i];

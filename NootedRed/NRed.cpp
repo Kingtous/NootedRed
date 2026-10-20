@@ -56,14 +56,17 @@
 #include <libkern/c++/OSMetaClass.h>
 #include <mach/i386/vm_types.h>
 
-// Generated 15.8.1 user-space VDA patch tables.  They are produced by tools/gen_vda_*_data.py and are
-// committed with this branch; the VCN bridge itself does not depend on them, but VDA user-space patching
-// is a no-op if they are absent.
+// Generated user-space VDA patch tables (macOS 14 Sonoma, 15.8.1 Sequoia, 26.7.1 Tahoe).  They are
+// produced by tools/gen_vda_*_data.py and are committed with this branch; the VCN bridge itself does
+// not depend on them, but VDA user-space patching is a no-op if they are absent.
 #if __has_include(<VDAVADataSonoma.hpp>)
 #include <VDAVADataSonoma.hpp>
 #endif
 #if __has_include(<VDAVADataSequoia.hpp>)
 #include <VDAVADataSequoia.hpp>
+#endif
+#if __has_include(<VDAVADataTahoe.hpp>)
+#include <VDAVADataTahoe.hpp>
 #endif
 #if __has_include(<VDAVAData.hpp>)
 #include <VDAVAData.hpp>
@@ -73,6 +76,9 @@
 #endif
 #if __has_include(<VDAGVADataSequoia.hpp>)
 #include <VDAGVADataSequoia.hpp>
+#endif
+#if __has_include(<VDAGVADataTahoe.hpp>)
+#include <VDAGVADataTahoe.hpp>
 #endif
 #if __has_include(<VDAGVAData.hpp>)
 #include <VDAGVAData.hpp>
@@ -103,6 +109,19 @@ void NRed::init()
         if constexpr (arrsize(VDAGVADataSonoma::Patches) > 0) {
             UserPatches::singleton().registerVDAFix(VDAGVADataSonoma::Patches,
                                                     arrsize(VDAGVADataSonoma::Patches));
+        }
+#endif
+    } else if (getKernelVersion() >= KernelVersion::Tahoe) {
+#if __has_include(<VDAVADataTahoe.hpp>)
+        if constexpr (arrsize(VDAVADataTahoe::Patches) > 0) {
+            UserPatches::singleton().registerVDAFix(VDAVADataTahoe::Patches,
+                                                    arrsize(VDAVADataTahoe::Patches));
+        }
+#endif
+#if __has_include(<VDAGVADataTahoe.hpp>)
+        if constexpr (arrsize(VDAGVADataTahoe::Patches) > 0) {
+            UserPatches::singleton().registerVDAFix(VDAGVADataTahoe::Patches,
+                                                    arrsize(VDAGVADataTahoe::Patches));
         }
 #endif
     } else if (getKernelVersion() >= KernelVersion::Sequoia) {

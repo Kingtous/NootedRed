@@ -52,6 +52,9 @@
 #include <mach/i386/vm_types.h>
 #include <mach/kern_return.h>
 
+// Firmware blobs are raw bytes; values > 0x7F intentionally truncate to char.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wc++11-narrowing"
 static const char ativvaxy_rv_dat[] = {
 #include "Firmware/ativvaxy_rv.dat.inc"
 };
@@ -260,6 +263,7 @@ static const char _sdma_4_1_ucode[] = {
 #include "Firmware/sdma_4_1_ucode.bin.inc"
 };
 SDMA_FW_CONSTANT("40", sdma_4_1_ucode, 0x29, 0x0, 0x0);
+#pragma clang diagnostic pop
 
 static const UInt8 kDeviceTypeTablePattern[] = {0x60, 0x68, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x61, 0x68, 0x00, 0x00,
                                                 0x00, 0x00, 0x00, 0x00, 0x62, 0x68, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,

@@ -173,6 +173,42 @@ namespace
     };
     constexpr size_t kResolverSignatureCount = arrsize(kResolverSignatures);
 
+    // macOS 26 (Tahoe) resolver contexts.
+    // The rip-relative displacement at bytes 27-30 is masked to wildcards for forward-compatibility across minor builds.
+    static const UInt8 kResolverMask32_HwTahoe[] = {
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF,
+    };
+
+    static const UInt8 kResolverHwCtx_Tahoe[] = {
+        0xAC, 0x00, 0x00, 0x00, 0x41, 0x83, 0xF8, 0x13, 0x77, 0x45, 0xC7, 0x07, 0x8D, 0x00, 0x00, 0x00,
+        0xC7, 0x47, 0x78, 0x04, 0x00, 0x00, 0x00, 0xC5, 0xF8, 0x28, 0x05, 0x50, 0xF3, 0x0D, 0x00, 0xC5,
+    };
+    static const UInt8 kResolverDualCtx_Tahoe[] = {
+        0x88, 0xA0, 0x00, 0x00, 0x00, 0xD1, 0xE9, 0x83, 0xE1, 0x01, 0x8B, 0x83, 0x98, 0x13, 0x00, 0x00,
+        0x83, 0xE0, 0xFE, 0x09, 0xC8, 0x89, 0x83, 0x98, 0x13, 0x00, 0x00, 0x48, 0x8B, 0x8B, 0x68, 0x0D,
+    };
+    static const UInt8 kResolverGateCtx_Tahoe[] = {
+        0xFF, 0xFF, 0xF6, 0x81, 0xA0, 0x00, 0x00, 0x00, 0x02, 0x48, 0x8B, 0x9D, 0x70, 0xFE, 0xFF, 0xFF,
+        0x74, 0x28, 0x80, 0xBD, 0x80, 0xFE, 0xFF, 0xFF, 0x00, 0x0F, 0x95, 0xC0, 0x48, 0x8B, 0x8D, 0x78,
+    };
+    static const UInt8 kResolverAllowCtx_Tahoe[] = {
+        0xFF, 0x48, 0xBA, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x48, 0x85, 0x54, 0x0B, 0x08,
+        0x0F, 0x94, 0xC1, 0x08, 0xC1, 0x0F, 0xB6, 0xC1, 0x41, 0x8B, 0x4C, 0x24, 0x28, 0x83, 0xE1, 0xFE,
+    };
+
+    static const UserPatches::SignaturePatch kResolverSignatures_Tahoe[] = {
+        {kResolverHwCtx_Tahoe, kResolverMask32_HwTahoe, sizeof(kResolverHwCtx_Tahoe), 16, kGLDriverHwInfoReplace,
+         sizeof(kGLDriverHwInfoReplace), 0, 1, 0xE000},
+        {kResolverDualCtx_Tahoe, kResolverMask32, sizeof(kResolverDualCtx_Tahoe), 16, kGLDriverDualQuadReplace,
+         sizeof(kGLDriverDualQuadReplace), 0, 1, 0x8000},
+        {kResolverGateCtx_Tahoe, kResolverMask32, sizeof(kResolverGateCtx_Tahoe), 16, kMTLGateReplace_Tahoe,
+         sizeof(kMTLGateReplace_Tahoe), 0, 1, ~static_cast<UInt64>(0)},
+        {kResolverAllowCtx_Tahoe, kResolverMask32, sizeof(kResolverAllowCtx_Tahoe), 16, kMTLAllowReplace_Tahoe,
+         sizeof(kMTLAllowReplace_Tahoe), 0, 1, ~static_cast<UInt64>(0)},
+    };
+    constexpr size_t kResolverSignatureCount_Tahoe = arrsize(kResolverSignatures_Tahoe);
+
     static const UserPatches::PagePatch kGLDriverPatches_Sonoma[] = {
         {UserPatcher::FileSegment::SegmentTextText, kGLDriverHwInfoPage_Sonoma,    kGLDriverHwInfoFind,
          kGLDriverHwInfoReplace,                    sizeof(kGLDriverHwInfoFind),   0, 1},
@@ -246,9 +282,10 @@ namespace
         {"15.8.1 / gfx9 APU fallback", PenguinWizardry::KernelVersion(24, 6),
          PenguinWizardry::KernelVersion(24, 6), UserPatches::kApuAll, kGLDriverPatches_Sequoia,
          kGLDriverPatchCount_Sequoia, kResolverSignatures, kResolverSignatureCount},
-        // macOS 26.7.1 (Darwin 25.6.0).  Exact page images make this a no-op on any other driver build.
-        {"26.7.1 / gfx9 APU", PenguinWizardry::KernelVersion(25, 6), PenguinWizardry::KernelVersion(25, 6),
-         UserPatches::kApuAll, kGLDriverPatches_Tahoe, kGLDriverPatchCount_Tahoe},
+        // macOS 26.x (Tahoe).
+        {"26.x / Tahoe gfx9 APU", PenguinWizardry::KernelVersion(25, 0), PenguinWizardry::KernelVersion(25, 99),
+         UserPatches::kApuAll, kGLDriverPatches_Tahoe, kGLDriverPatchCount_Tahoe,
+         kResolverSignatures_Tahoe, kResolverSignatureCount_Tahoe},
         // macOS 14.x (Sonoma) fallback.
         {"14.x / Sonoma gfx9 APU", PenguinWizardry::KernelVersion(23, 0), PenguinWizardry::KernelVersion(23, 99),
          UserPatches::kApuAll, kGLDriverPatches_Sonoma, kGLDriverPatchCount_Sonoma,
@@ -369,8 +406,8 @@ void UserPatches::selectPatchSet()
         SYSLOG("UserPatch", "Fallback: selecting macOS 26 (Tahoe) GL/Metal patch set");
         this->patches        = kGLDriverPatches_Tahoe;
         this->patchCount     = kGLDriverPatchCount_Tahoe;
-        this->signatures     = nullptr;
-        this->signatureCount = 0;
+        this->signatures     = kResolverSignatures_Tahoe;
+        this->signatureCount = kResolverSignatureCount_Tahoe;
         for (auto& applied : this->signatureApplied) { applied = 0; }
     } else if (getKernelVersion() >= KernelVersion::Sequoia) {
         SYSLOG("UserPatch", "Fallback: selecting macOS 15 (Sequoia) GL/Metal patch set");
@@ -636,6 +673,17 @@ auto UserPatches::buildNativePatches() -> bool
         return false;
     }
 
+    if (this->vdaEnabled) {
+        // Make a silent no-match after an OS update diagnosable: if the VCN bridge is ready yet
+        // NRedVCNUserApplied stays below this count, the system no longer matches the generated data.
+        size_t vdaPages = 0;
+        for (size_t pageIndex = 0; pageIndex < this->nativePageCount; pageIndex++) {
+            vdaPages += this->nativePages[pageIndex].vda ? 1 : 0;
+        }
+        SYSLOG("UserPatch", "VDA: %zu user-space driver page(s) registered; compare NRedVCNUserApplied to confirm",
+               vdaPages);
+    }
+
     return true;
 }
 
@@ -804,8 +852,65 @@ void UserPatches::patchNativePage(const void* const data, const UInt64 pageOffse
     // The page may already contain our replacement bytes from an earlier validation (the page cache is
     // shared).  Do not rescan it with the resolver; that would only produce false "signature not found"
     // errors and unnecessary work.
+    // A page that matches every individual patch site but not the whole stored image means the table was
+    // built from a different (or polluted) build of the driver: the patch is silently skipped and the
+    // failure only surfaces indirectly (e.g. VideoToolbox falling back to software).  Log it once per
+    // declared page.  All sites must match, otherwise an unrelated page with colliding bytes at one site
+    // would trip the one-shot flag and suppress the diagnostic for the real target page.
+    // The memcmp stays in bounds by construction: buildNativePatches() rejects null find/zero or oversized
+    // sites and only registers offsets found by scanning with `offset + size <= kPageSize`, and `data`
+    // always addresses a full page here.
     for (size_t pageIndex = 0; pageIndex < this->nativePageCount; pageIndex++) {
-        if (this->isPatchedPage(this->nativePages[pageIndex], static_cast<const UInt8*>(data))) { return; }
+        auto& page = this->nativePages[pageIndex];
+        if (page.siteCount == 0 || page.mismatchLogged) { continue; }
+        bool allSitesMatch = true;
+        for (size_t siteIndex = 0; siteIndex < page.siteCount; siteIndex++) {
+            const auto& site = page.sites[siteIndex];
+            // Defensive re-validation of the registration-time invariants (see above): reject any site
+            // that could not be compared safely even if a future registration path bypassed the checks.
+            if (site.find == nullptr || site.size == 0 || site.size > kPageSize
+                || site.offset > kPageSize - site.size)
+            {
+                allSitesMatch = false;
+                break;
+            }
+            if (memcmp(static_cast<const UInt8*>(data) + site.offset, site.find, site.size) != 0) {
+                allSitesMatch = false;
+                break;
+            }
+        }
+        if (!allSitesMatch) { continue; }
+
+        if (page.vda && !VCNBridge::singleton().loadReady()) {
+            DBGLOG("UserPatch", "VDA page site-matched but the VCN bridge is not ready; leaving it unpatched");
+            continue;
+        }
+
+        if (MachInfo::setKernelWriting(true, KernelPatcher::kernelWriteLock) != KERN_SUCCESS) {
+            SYSLOG("UserPatch", "Failed to disable kernel write protection for site fallback");
+            return;
+        }
+
+        for (size_t siteIndex = 0; siteIndex < page.siteCount; siteIndex++) {
+            const auto& site = page.sites[siteIndex];
+            memcpy(const_cast<UInt8*>(static_cast<const UInt8*>(data)) + site.offset, site.replace, site.size);
+        }
+
+        if (MachInfo::setKernelWriting(false, KernelPatcher::kernelWriteLock) != KERN_SUCCESS) {
+            SYSLOG("UserPatch", "Failed to restore kernel write protection for site fallback");
+        }
+
+        page.mismatchLogged = true;
+        SYSLOG("UserPatch",
+               "Page %zu: stored page image differed, but all %zu patch site(s) matched; site-patched successfully",
+               pageIndex, page.siteCount);
+
+        if (page.vda) {
+            const auto applied = static_cast<UInt32>(OSIncrementAtomic(&this->vdaAppliedCount) + 1);
+            NRed::singleton().setProp32("NRedVCNUserApplied", applied);
+        }
+
+        return;
     }
 
     this->patchSignaturePage(data, pageOffset);
