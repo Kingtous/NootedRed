@@ -59,16 +59,17 @@ namespace
 
     // The build string is checked once the accelerator starts, not in NRed::init: the early kext-load
     // phase can run before `osversion` is populated, which would otherwise disable a valid bridge.
+    // Allow any patch/sub-build of the supported minor series (e.g. 14.8.x matches "23J", 15.8.x matches "24H").
     bool isSupportedBuild()
     {
         if (!isSupportedOS()) { return false; }
         // If the early-boot version string is not populated yet, the ABI guards are the remaining
-        // protection; once it is visible, require the exact validated build.
+        // protection; once it is visible, require the matching minor release family.
         if (osversion[0] == '\0') { return true; }
         if (currentKernelVersion().major() == 24) {
-            return strncmp(osversion, "24H32", 5) == 0;
+            return strncmp(osversion, "24H", 3) == 0;
         } else if (currentKernelVersion().major() == 23) {
-            return strncmp(osversion, "23J631", 6) == 0;
+            return strncmp(osversion, "23J", 3) == 0;
         }
         return false;
     }
