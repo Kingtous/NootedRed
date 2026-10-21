@@ -484,7 +484,10 @@ void UserSurfaceSync::init(KernelPatcher& patcher)
 {
     submitGuard = !checkKernelArgument("-NRedNoSubmitGuard");
     NRed::singleton().setProp32("NRedSubmitGuardVersion", 1);
-    if (submitGuard) { NRed::singleton().setProp32("NRedSubmitGuardEnabled", 1); }
+    if (submitGuard) {
+        NRed::singleton().setProp32("NRedSubmitGuardEnabled", 1);
+        NRed::singleton().setProp32("NRedSubmitGuardRevision", 5);
+    }
     else { NRed::singleton().setProp32("NRedSubmitGuardDisabled", 1); }
     NRed::singleton().setProp32("NRedImmediateSyncVersion", 1);
     NRed::singleton().setProp32("NRedImmediateSyncRevision", 4);
