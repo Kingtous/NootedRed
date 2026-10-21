@@ -1146,6 +1146,118 @@ void UserPatches::applySubmitGuard(proc_t process, void* rawArgs)
             DBGLOG("UserPatch", "SubmitGuard installed in %s (PID %d)", name, pid);
         }
     }
+
+    // Also apply Metal LegacyBlend / dual-quad fix to this dyld shared cache instance
+    this->applyLegacyBlend(map, base, process);
+}
+
+void UserPatches::applyLegacyBlend(vm_map_t map, mach_vm_offset_t base, proc_t process)
+{
+    const auto kernelMajor = currentKernelVersion().major();
+    mach_vm_offset_t gateOffset = 0;
+    mach_vm_offset_t allowOffset = 0;
+
+    if (kernelMajor == 23) {
+        // macOS 14 Sonoma (Darwin 23)
+        // Gate (75 0B -> EB 0B) at 0x30354D1BCULL
+        // Allow (force DISABLE_DUAL_QUAD = 1: B0 01 90) at 0x30354D1DBULL
+        gateOffset = 0x30354D1BCULL;
+        allowOffset = 0x30354D1DBULL;
+    } else if (kernelMajor == 24) {
+        // macOS 15 Sequoia (Darwin 24)
+        gateOffset = 0x3087B3164ULL;
+        allowOffset = 0x3087B3185ULL;
+    } else if (kernelMajor == 25) {
+        // macOS 26 Tahoe (Darwin 25)
+        gateOffset = 0x310C77708ULL;
+    } else {
+        return;
+    }
+
+    const mach_vm_address_t gateAddr = base + gateOffset;
+    UInt8 gateBytes[2]{};
+    if (copyInFunc(reinterpret_cast<const void*>(gateAddr), gateBytes, sizeof(gateBytes)) != 0) {
+        return;
+    }
+
+    bool needsGatePatch = false;
+    UInt8 targetGate[2]{0xEB, 0x0B};
+    if (kernelMajor == 23 || kernelMajor == 24) {
+        if (gateBytes[0] == 0x75 && gateBytes[1] == 0x0B) {
+            needsGatePatch = true;
+        } else if (gateBytes[0] == 0xEB && gateBytes[1] == 0x0B) {
+            // Already patched gate
+        } else {
+            return; // Unknown opcode, safely skip
+        }
+    } else if (kernelMajor == 25) {
+        targetGate[0] = 0xEB; targetGate[1] = 0x00;
+        if (gateBytes[0] == 0x74 && gateBytes[1] == 0x28) {
+            needsGatePatch = true;
+        }
+    }
+
+    bool needsAllowPatch = false;
+    UInt8 targetAllow[3] = {0xB0, 0x01, 0x90};
+    mach_vm_address_t allowAddr = 0;
+    if (allowOffset != 0) {
+        allowAddr = base + allowOffset;
+        UInt8 allowBytes[3]{};
+        if (copyInFunc(reinterpret_cast<const void*>(allowAddr), allowBytes, sizeof(allowBytes)) == 0) {
+            if ((allowBytes[0] == 0x31 && allowBytes[1] == 0xC0 && allowBytes[2] == 0x90) ||
+                (allowBytes[0] == 0x0F && allowBytes[1] == 0x93 && allowBytes[2] == 0xC0) ||
+                (allowBytes[0] == 0x0F && allowBytes[1] == 0x94 && allowBytes[2] == 0xC0)) {
+                needsAllowPatch = true;
+            }
+        }
+    }
+
+    if (!needsGatePatch && !needsAllowPatch) {
+        return;
+    }
+
+    const mach_vm_address_t pageAddr = gateAddr & ~static_cast<mach_vm_address_t>(PAGE_SIZE - 1);
+    vm_prot_t protection{VM_PROT_NONE};
+    if (!leafProtection(map, pageAddr, protection) || protection != (VM_PROT_READ | VM_PROT_EXECUTE)) {
+        return;
+    }
+
+    auto result = vm_protect(map, pageAddr, PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+    if (result != KERN_SUCCESS) {
+        return;
+    }
+
+    int writeErr = 0;
+    if (needsGatePatch) {
+        writeErr |= copyOutFunc(targetGate, reinterpret_cast<void*>(gateAddr), sizeof(targetGate));
+    }
+    if (needsAllowPatch && allowAddr != 0) {
+        writeErr |= copyOutFunc(targetAllow, reinterpret_cast<void*>(allowAddr), sizeof(targetAllow));
+    }
+
+    auto restored = vm_protect(map, pageAddr, PAGE_SIZE, FALSE, protection);
+    if (restored == KERN_SUCCESS) {
+        vm_protect(map, pageAddr, PAGE_SIZE, TRUE, protection);
+    }
+
+    if (writeErr == 0 && restored == KERN_SUCCESS) {
+        static volatile UInt32 blendCounter{0};
+        const auto count = static_cast<UInt32>(OSIncrementAtomic(&blendCounter) + 1);
+        NRed::singleton().setProp32("NRedLegacyBlendApplied", count);
+
+        const auto proc = (process != nullptr) ? process : current_proc();
+        if (proc != nullptr) {
+            const auto pid = proc_pid(proc);
+            char name[32]{};
+            if (pid > 0) { proc_name(pid, name, sizeof(name)); }
+            name[sizeof(name) - 1] = '\0';
+            if (strcmp(name, "WindowServer") == 0) {
+                NRed::singleton().setProp32("NRedLegacyBlendWindowServerPID", static_cast<UInt32>(pid));
+                NRed::singleton().setProp32("NRedLegacyBlendWindowServerApplied", 1);
+            }
+            DBGLOG("UserPatch", "LegacyBlend patched in %s (PID %d)", name, pid);
+        }
+    }
 }
 
 bool UserPatches::installSubmitGuard(KernelPatcher& patcher)
@@ -1180,7 +1292,9 @@ bool UserPatches::installSubmitGuard(KernelPatcher& patcher)
 
     NRed::singleton().setProp32("NRedSubmitGuardEnabled", 1);
     NRed::singleton().setProp32("NRedSubmitGuardVersion", 1);
-    SYSLOG("UserPatch", "SubmitGuard enabled for Darwin %u (offset 0x%llX)", kernelMajor,
+    NRed::singleton().setProp32("NRedLegacyBlendEnabled", 1);
+    NRed::singleton().setProp32("NRedLegacyBlendVersion", 1);
+    SYSLOG("UserPatch", "SubmitGuard and LegacyBlend enabled for Darwin %u (offset 0x%llX)", kernelMajor,
            UserSubmitGuardData::getMethodOffset(kernelMajor));
     return true;
 }
