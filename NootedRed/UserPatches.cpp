@@ -28,12 +28,22 @@
 #include <PenguinWizardry/KernelVersion.hpp>
 #include <UserPatches.hpp>
 #include <TahoePatchData.hpp>
+#include <UserSubmitGuard.hpp>
 #include <VCNBridge.hpp>
 #include <libkern/OSAtomic.h>
 #include <libkern/OSTypes.h>
 #include <mach/i386/vm_types.h>
+#include <mach/vm_map.h>
+#include <mach/vm_region.h>
+#include <kern/task.h>
 
 static UserPatches moduleInstance;
+
+extern "C" {
+    int proc_pid(proc_t);
+    void proc_name(int, char*, int);
+    proc_t current_proc(void);
+}
 
 namespace
 {
@@ -47,6 +57,39 @@ namespace
     const char* const kBootArgVDA              = "-NRedVDA";
     const char* const kBootArgAVC              = "-NRedAVC";
     const char* const kBootArgAVCEncode        = "-NRedAVCEncode";
+    const char* const kBootArgNoSubmitGuard    = "-NRedNoSubmitGuard";
+
+    using GetTaskMap = vm_map_t (*)(task_t);
+    using RegionRecurse = kern_return_t (*)(vm_map_t, mach_vm_address_t*, mach_vm_size_t*, natural_t*,
+                                            vm_region_recurse_info_t, mach_msg_type_number_t*);
+    using CopyIn = int (*)(const void*, void*, size_t);
+    using CopyOut = int (*)(const void*, void*, size_t);
+
+    GetTaskMap    getTaskMapFunc{nullptr};
+    RegionRecurse queryRegionFunc{nullptr};
+    CopyIn        copyInFunc{nullptr};
+    CopyOut       copyOutFunc{nullptr};
+
+    bool leafProtection(vm_map_t map, const mach_vm_address_t page, vm_prot_t& protection)
+    {
+        if (queryRegionFunc == nullptr) { return false; }
+        natural_t depth{0};
+        for (UInt32 attempt = 0; attempt < 8; ++attempt) {
+            auto address = page;
+            mach_vm_size_t size{0};
+            vm_region_submap_short_info_data_64_t info{};
+            mach_msg_type_number_t count = VM_REGION_SUBMAP_SHORT_INFO_COUNT_64;
+            const auto result = queryRegionFunc(map, &address, &size, &depth,
+                                                reinterpret_cast<vm_region_recurse_info_t>(&info), &count);
+            if (result != KERN_SUCCESS) { return false; }
+            if (count < VM_REGION_SUBMAP_SHORT_INFO_COUNT_64 || address > page || page - address >= size
+                || size - (page - address) < PAGE_SIZE) { return false; }
+            if (!info.is_submap) { protection = info.protection; return true; }
+            if (depth == ~0U) { break; }
+            ++depth;
+        }
+        return false;
+    }
 
     // The patch bytes and page images below are specific to one driver build, and the native backend hooks
     // code signing page validation, so this is opt-in until the table has been filled in and tested.
@@ -320,7 +363,9 @@ void UserPatches::init()
                        || checkKernelArgument(kBootArgAVC)
                        || checkKernelArgument(kBootArgAVCEncode);
 
-    if (!this->enabled && !this->vdaEnabled) {
+    this->submitGuardEnabled = !checkKernelArgument(kBootArgNoSubmitGuard);
+
+    if (!this->enabled && !this->vdaEnabled && !this->submitGuardEnabled) {
         DBGLOG("UserPatch", "User-space driver patches are disabled");
         return;
     }
@@ -332,6 +377,7 @@ void UserPatches::init()
         }
     }
     if (this->vdaEnabled) { SYSLOG("UserPatch", "Enabling user-space VDA driver patches (experimental)"); }
+    if (this->submitGuardEnabled) { SYSLOG("UserPatch", "Enabling user-space Metal SubmitGuard (free tail filler)"); }
 }
 
 void UserPatches::registerGLDriverFix(const PagePatch* const patchTable, const size_t count)
@@ -443,6 +489,10 @@ void UserPatches::registerVDAFix(const PagePatch* const patchTable, const size_t
 
 void UserPatches::processPatcher(KernelPatcher& patcher)
 {
+    if (this->submitGuardEnabled) {
+        this->installSubmitGuard(patcher);
+    }
+
     if (!this->enabled && !this->vdaEnabled) {
         DBGLOG("UserPatch", "User-space driver patches are disabled");
         return;
@@ -943,4 +993,155 @@ boolean_t UserPatches::wrapCsValidateRange(void* const vnode, void* const pager,
     }
 
     return result;
+}
+
+int UserPatches::wrapSharedRegionCheck(void* const shared_region, const cpu_type_t cpu)
+{
+    auto& patches = singleton();
+    const auto result = FunctionCast(wrapSharedRegionCheck, patches.orgSharedRegionCheck)(shared_region, cpu);
+    if (result == 0 && patches.submitGuardEnabled) {
+        patches.applySubmitGuard();
+    }
+    return result;
+}
+
+void UserPatches::applySubmitGuard()
+{
+    if (getTaskMapFunc == nullptr || copyInFunc == nullptr || copyOutFunc == nullptr) {
+        return;
+    }
+
+    const auto kernelMajor = currentKernelVersion().major();
+    const auto methodOffset = UserSubmitGuardData::getMethodOffset(kernelMajor);
+    if (methodOffset == 0) {
+        return;
+    }
+
+    auto map = getTaskMapFunc(current_task());
+    if (map == nullptr) {
+        return;
+    }
+
+    const auto method = UserSubmitGuardData::kDyldSharedCacheBase + methodOffset;
+    UInt8 entry[UserSubmitGuardData::MethodPatchSize];
+    if (copyInFunc(reinterpret_cast<const void*>(method), entry, sizeof(entry)) != 0) {
+        return;
+    }
+
+    static constexpr UInt8 patchedPrefix[6] = {0xFF, 0x25, 0x00, 0x00, 0x00, 0x00};
+    if (memcmp(entry, patchedPrefix, sizeof(patchedPrefix)) == 0) {
+        // Already patched in this process space.
+        return;
+    }
+
+    if (memcmp(entry, UserSubmitGuardData::MethodOriginal, sizeof(entry)) != 0) {
+        // Entry does not match expected prologue; safely avoid touching.
+        return;
+    }
+
+    vm_address_t page{0};
+    auto result = vm_allocate(map, &page, PAGE_SIZE, VM_FLAGS_ANYWHERE);
+    if (result != KERN_SUCCESS) {
+        return;
+    }
+
+    UInt8 payload[sizeof(UserSubmitGuardData::Payload)];
+    memcpy(payload, UserSubmitGuardData::Payload, sizeof(payload));
+    const UInt64 continuation = method + UserSubmitGuardData::MethodPatchSize;
+    memcpy(payload + UserSubmitGuardData::PayloadJumpOffset, &continuation, sizeof(continuation));
+
+    if (copyOutFunc(payload, reinterpret_cast<void*>(page), sizeof(payload)) != 0) {
+        vm_deallocate(map, page, PAGE_SIZE);
+        return;
+    }
+
+    result = vm_protect(map, page, PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+    if (result != KERN_SUCCESS) {
+        vm_deallocate(map, page, PAGE_SIZE);
+        return;
+    }
+
+    UInt8 patch[UserSubmitGuardData::MethodPatchSize];
+    memset(patch, 0x90, sizeof(patch));
+    memcpy(patch, patchedPrefix, sizeof(patchedPrefix));
+    const UInt64 target = page;
+    memcpy(patch + 6, &target, sizeof(target));
+
+    const UInt64 methodPage = method & ~static_cast<UInt64>(PAGE_SIZE - 1);
+    vm_prot_t protection{VM_PROT_NONE};
+    if (!leafProtection(map, methodPage, protection)
+        || protection != (VM_PROT_READ | VM_PROT_EXECUTE)) {
+        vm_deallocate(map, page, PAGE_SIZE);
+        return;
+    }
+
+    result = vm_protect(map, methodPage, PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+    if (result != KERN_SUCCESS) {
+        vm_deallocate(map, page, PAGE_SIZE);
+        return;
+    }
+
+    const auto written = copyOutFunc(patch, reinterpret_cast<void*>(method), sizeof(patch));
+
+    // Restore protections: first current, then maximum
+    auto restored = vm_protect(map, methodPage, PAGE_SIZE, FALSE, protection);
+    if (restored == KERN_SUCCESS) {
+        vm_protect(map, methodPage, PAGE_SIZE, TRUE, protection);
+    }
+
+    if (written == 0 && restored == KERN_SUCCESS) {
+        static volatile UInt32 appliedCounter{0};
+        const auto count = OSIncrementAtomic(&appliedCounter) + 1;
+        NRed::singleton().setProp32("NRedSubmitGuardApplied", count);
+
+        const auto proc = current_proc();
+        if (proc != nullptr) {
+            const auto pid = proc_pid(proc);
+            char name[32]{};
+            if (pid > 0) { proc_name(pid, name, sizeof(name)); }
+            name[sizeof(name) - 1] = '\0';
+            if (strcmp(name, "WindowServer") == 0) {
+                NRed::singleton().setProp32("NRedSubmitGuardWindowServerPID", static_cast<UInt32>(pid));
+                NRed::singleton().setProp32("NRedSubmitGuardWindowServerApplied", 1);
+            }
+            DBGLOG("UserPatch", "SubmitGuard installed in %s (PID %d)", name, pid);
+        }
+    }
+}
+
+bool UserPatches::installSubmitGuard(KernelPatcher& patcher)
+{
+    const auto kernelMajor = currentKernelVersion().major();
+    if (kernelMajor != 23 && kernelMajor != 24 && kernelMajor != 25) {
+        DBGLOG("UserPatch", "SubmitGuard not supported on Darwin %u", kernelMajor);
+        return false;
+    }
+
+    getTaskMapFunc = reinterpret_cast<GetTaskMap>(patcher.solveSymbol(KernelPatcher::KernelID, "_get_task_map"));
+    patcher.clearError();
+    queryRegionFunc = reinterpret_cast<RegionRecurse>(
+        patcher.solveSymbol(KernelPatcher::KernelID, "_mach_vm_region_recurse"));
+    patcher.clearError();
+    copyInFunc = reinterpret_cast<CopyIn>(patcher.solveSymbol(KernelPatcher::KernelID, "_copyin"));
+    patcher.clearError();
+    copyOutFunc = reinterpret_cast<CopyOut>(patcher.solveSymbol(KernelPatcher::KernelID, "_copyout"));
+    patcher.clearError();
+
+    if (!getTaskMapFunc || !queryRegionFunc || !copyInFunc || !copyOutFunc) {
+        SYSLOG("UserPatch", "Failed to resolve kernel symbols for SubmitGuard");
+        return false;
+    }
+
+    KernelPatcher::RouteRequest request{"_shared_region_check_np", wrapSharedRegionCheck, this->orgSharedRegionCheck};
+    if (!patcher.routeMultipleLong(KernelPatcher::KernelID, &request, 1)) {
+        patcher.clearError();
+        SYSLOG("UserPatch", "Failed to route _shared_region_check_np for SubmitGuard");
+        return false;
+    }
+
+    NRed::singleton().setProp32("NRedSubmitGuardEnabled", 1);
+    NRed::singleton().setProp32("NRedSubmitGuardVersion", 1);
+    SYSLOG("UserPatch", "SubmitGuard enabled for Darwin %u (offset 0x%llX)", kernelMajor,
+           UserSubmitGuardData::getMethodOffset(kernelMajor));
+    return true;
 }

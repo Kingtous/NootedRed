@@ -243,6 +243,13 @@ private:
     // original signature context.
     auto isPatchedPage(const NativePage& page, const UInt8* data) const -> bool;
 
+    bool              submitGuardEnabled{false};
+    mach_vm_address_t orgSharedRegionCheck{0};
+
+    auto installSubmitGuard(KernelPatcher& patcher) -> bool;
+    void applySubmitGuard();
+    static int wrapSharedRegionCheck(void* shared_region, cpu_type_t cpu);
+
     static void      wrapCsValidatePage(void* vnode, void* pager, UInt64 pageOffset, const void* data, int* validated,
                                         int* tainted, int* nx);
     static boolean_t wrapCsValidateRange(void* vnode, void* pager, UInt64 pageOffset, const void* data, UInt64 dataSize,
