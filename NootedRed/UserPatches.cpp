@@ -36,6 +36,8 @@
 #include <mach/vm_map.h>
 #include <mach/vm_region.h>
 #include <kern/task.h>
+#include <IOKit/IOUserClient.h>
+#include <libkern/c++/OSBoolean.h>
 
 static UserPatches moduleInstance;
 
@@ -58,6 +60,22 @@ namespace
     const char* const kBootArgAVC              = "-NRedAVC";
     const char* const kBootArgAVCEncode        = "-NRedAVCEncode";
     const char* const kBootArgNoSubmitGuard    = "-NRedNoSubmitGuard";
+
+    struct SharedRegionCheckArgs
+    {
+        user_addr_t startAddress;
+    };
+    static_assert(sizeof(SharedRegionCheckArgs) == 8);
+    using SharedRegionCheck = int (*)(proc_t, SharedRegionCheckArgs*, int*);
+
+    bool isFairPlayClient(const task_t task)
+    {
+        if (task == nullptr) { return false; }
+        auto* entitlement = IOUserClient::copyClientEntitlement(task, "com.apple.private.fpsd.client");
+        const bool client = (entitlement == kOSBooleanTrue);
+        if (entitlement != nullptr) { entitlement->release(); }
+        return client;
+    }
 
     using GetTaskMap = vm_map_t (*)(task_t);
     using RegionRecurse = kern_return_t (*)(vm_map_t, mach_vm_address_t*, mach_vm_size_t*, natural_t*,
@@ -869,6 +887,11 @@ void UserPatches::patchNativePage(const void* const data, const UInt64 pageOffse
             continue;
         }
 
+        if (page.vda && isFairPlayClient(current_task())) {
+            DBGLOG("UserPatch", "Skipping VDA patches for FairPlay client task");
+            continue;
+        }
+
         // The page matches, so these checks can only fail when the table is inconsistent; never patch then.
         for (size_t siteIndex = 0; siteIndex < page.siteCount; siteIndex++) {
             const auto& site = page.sites[siteIndex];
@@ -939,6 +962,11 @@ void UserPatches::patchNativePage(const void* const data, const UInt64 pageOffse
             continue;
         }
 
+        if (page.vda && isFairPlayClient(current_task())) {
+            DBGLOG("UserPatch", "Skipping VDA patches for FairPlay client task (site fallback)");
+            continue;
+        }
+
         if (MachInfo::setKernelWriting(true, KernelPatcher::kernelWriteLock) != KERN_SUCCESS) {
             SYSLOG("UserPatch", "Failed to disable kernel write protection for site fallback");
             return;
@@ -995,17 +1023,17 @@ boolean_t UserPatches::wrapCsValidateRange(void* const vnode, void* const pager,
     return result;
 }
 
-int UserPatches::wrapSharedRegionCheck(void* const shared_region, const cpu_type_t cpu)
+int UserPatches::wrapSharedRegionCheck(proc_t process, void* args, int* returnValue)
 {
     auto& patches = singleton();
-    const auto result = FunctionCast(wrapSharedRegionCheck, patches.orgSharedRegionCheck)(shared_region, cpu);
-    if (result == 0 && patches.submitGuardEnabled) {
-        patches.applySubmitGuard();
+    const auto result = FunctionCast(wrapSharedRegionCheck, patches.orgSharedRegionCheck)(process, args, returnValue);
+    if (result == 0 && patches.submitGuardEnabled && args != nullptr) {
+        patches.applySubmitGuard(process, args);
     }
     return result;
 }
 
-void UserPatches::applySubmitGuard()
+void UserPatches::applySubmitGuard(proc_t process, void* rawArgs)
 {
     if (getTaskMapFunc == nullptr || copyInFunc == nullptr || copyOutFunc == nullptr) {
         return;
@@ -1022,7 +1050,18 @@ void UserPatches::applySubmitGuard()
         return;
     }
 
-    const auto method = UserSubmitGuardData::kDyldSharedCacheBase + methodOffset;
+    mach_vm_offset_t base = UserSubmitGuardData::kDyldSharedCacheBase;
+    if (rawArgs != nullptr) {
+        const auto* args = static_cast<const SharedRegionCheckArgs*>(rawArgs);
+        if (args->startAddress != 0) {
+            mach_vm_offset_t userBase{0};
+            if (copyInFunc(reinterpret_cast<const void*>(args->startAddress), &userBase, sizeof(userBase)) == 0 && userBase != 0) {
+                base = userBase;
+            }
+        }
+    }
+
+    const auto method = base + methodOffset;
     UInt8 entry[UserSubmitGuardData::MethodPatchSize];
     if (copyInFunc(reinterpret_cast<const void*>(method), entry, sizeof(entry)) != 0) {
         return;
@@ -1091,10 +1130,10 @@ void UserPatches::applySubmitGuard()
 
     if (written == 0 && restored == KERN_SUCCESS) {
         static volatile UInt32 appliedCounter{0};
-        const auto count = OSIncrementAtomic(&appliedCounter) + 1;
+        const auto count = static_cast<UInt32>(OSIncrementAtomic(&appliedCounter) + 1);
         NRed::singleton().setProp32("NRedSubmitGuardApplied", count);
 
-        const auto proc = current_proc();
+        const auto proc = (process != nullptr) ? process : current_proc();
         if (proc != nullptr) {
             const auto pid = proc_pid(proc);
             char name[32]{};

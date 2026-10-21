@@ -247,8 +247,8 @@ private:
     mach_vm_address_t orgSharedRegionCheck{0};
 
     auto installSubmitGuard(KernelPatcher& patcher) -> bool;
-    void applySubmitGuard();
-    static int wrapSharedRegionCheck(void* shared_region, cpu_type_t cpu);
+    void applySubmitGuard(proc_t process, void* args);
+    static int wrapSharedRegionCheck(proc_t process, void* args, int* returnValue);
 
     static void      wrapCsValidatePage(void* vnode, void* pager, UInt64 pageOffset, const void* data, int* validated,
                                         int* tainted, int* nx);
