@@ -269,18 +269,18 @@ namespace
     static const UserPatches::PatchSet kGLDriverPatchSets[] = {
         // Family-specific entries first: all current gfx9 APUs share the same page data, but keeping
         // them separate lets a future family diverge without changing the selection code.
-        {"15.8.1 / Renoir-family", PenguinWizardry::KernelVersion(24, 6), PenguinWizardry::KernelVersion(24, 6),
+        {"15.x / Renoir-family", PenguinWizardry::KernelVersion(24, 0), PenguinWizardry::KernelVersion(24, 99),
          static_cast<UserPatches::ApuMask>(UserPatches::kApuRenoir | UserPatches::kApuRenoirE |
                                            UserPatches::kApuGreenSardine),
          kGLDriverPatches_Sequoia, kGLDriverPatchCount_Sequoia, kResolverSignatures, kResolverSignatureCount},
-        {"15.8.1 / Raven-family", PenguinWizardry::KernelVersion(24, 6), PenguinWizardry::KernelVersion(24, 6),
+        {"15.x / Raven-family", PenguinWizardry::KernelVersion(24, 0), PenguinWizardry::KernelVersion(24, 99),
          static_cast<UserPatches::ApuMask>(UserPatches::kApuRaven | UserPatches::kApuRaven2 |
                                            UserPatches::kApuPicasso),
          kGLDriverPatches_Sequoia, kGLDriverPatchCount_Sequoia, kResolverSignatures, kResolverSignatureCount},
         // Generic fallback for the case where APU attributes are not populated yet.  It is deliberately
         // last so a known family always wins.
-        {"15.8.1 / gfx9 APU fallback", PenguinWizardry::KernelVersion(24, 6),
-         PenguinWizardry::KernelVersion(24, 6), UserPatches::kApuAll, kGLDriverPatches_Sequoia,
+        {"15.x / gfx9 APU fallback", PenguinWizardry::KernelVersion(24, 0),
+         PenguinWizardry::KernelVersion(24, 99), UserPatches::kApuAll, kGLDriverPatches_Sequoia,
          kGLDriverPatchCount_Sequoia, kResolverSignatures, kResolverSignatureCount},
         // macOS 26.x (Tahoe).
         {"26.x / Tahoe gfx9 APU", PenguinWizardry::KernelVersion(25, 0), PenguinWizardry::KernelVersion(25, 99),

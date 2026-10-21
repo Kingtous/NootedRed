@@ -57,7 +57,7 @@ namespace
     // macOS 14.8.9 (23J631, Darwin 23.6.0) and macOS 26.7.1 (25G241, Darwin 25.6.0).
     bool isSupportedOS()
     {
-        if ((currentKernelVersion().major() == 24 && currentKernelVersion().minor() == 6)
+        if (currentKernelVersion().major() == 24
             || (currentKernelVersion().major() == 23 && currentKernelVersion().minor() == 6)) {
             return true;
         }
@@ -77,7 +77,7 @@ namespace
         // protection; once it is visible, require the matching minor release family.
         if (osversion[0] == '\0') { return true; }
         if (currentKernelVersion().major() == 24) {
-            return strncmp(osversion, "24H", 3) == 0;
+            return strncmp(osversion, "24H", 3) == 0 || strncmp(osversion, "24G", 3) == 0;
         } else if (currentKernelVersion().major() == 23) {
             return strncmp(osversion, "23H", 3) == 0 || strncmp(osversion, "23J", 3) == 0 || strncmp(osversion, "23G", 3) == 0;
         }

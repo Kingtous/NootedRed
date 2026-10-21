@@ -98,6 +98,8 @@ void NRed::init()
 
     Backlight::singleton().init();
 
+    this->forceVDA = checkKernelArgument("-NRedForceVDA");
+
     if (getKernelVersion() == KernelVersion::Sonoma) {
 #if __has_include(<VDAVADataSonoma.hpp>)
         if constexpr (arrsize(VDAVADataSonoma::Patches) > 0) {
@@ -281,11 +283,22 @@ void NRed::processPatcher(KernelPatcher& patcher)
         auto device = OSDynamicCast(IOPCIDevice, devInfo->videoExternal[i].video);
         if (device == nullptr) { continue; }
 
-        this->externalVideo = true;
+        const auto vendor = WIOKit::readPCIConfigValue(device, WIOKit::kIOPCIConfigVendorID);
+        if (vendor == WIOKit::VendorID::ATIAMD) {
+            DBGLOG("NRed", "Found external AMD video device 0x%04X:0x%04X", vendor,
+                   WIOKit::readPCIConfigValue(device, WIOKit::kIOPCIConfigDeviceID));
+            this->externalVideo = true;
+        } else {
+            DBGLOG("NRed", "Ignoring non-AMD external video device (vendor 0x%04X)", vendor);
+        }
 
         snprintf(name, arrsize(name), "GFX%zu", ii++);
         WIOKit::renameDevice(device, name);
         WIOKit::awaitPublishing(device);
+    }
+
+    if (this->externalVideo && this->forceVDA) {
+        SYSLOG("NRed", "External AMD video device detected, but -NRedForceVDA is set; overriding external video check");
     }
 
     VDA::singleton().processPatcher();
