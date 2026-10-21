@@ -5,6 +5,7 @@
 // See LICENSE for details.
 
 #include <Backlight.hpp>
+#include <ECBacklight.hpp>
 #include <GPUDriversAMD/DC/SignalTypes.hpp>
 #include <Headers/kern_api.hpp>
 #include <Headers/kern_devinfo.hpp>
@@ -154,7 +155,13 @@ bool Backlight::OnAppleBacklightDisplayLoad(void* const, void* const, IOService*
 
     if (maxBrightness->unsigned32BitValue() == 0) { return false; }
 
-    singleton().maxBacklightLvl = maxBrightness->unsigned32BitValue();
+    __atomic_store_n(&singleton().maxBacklightLvl, maxBrightness->unsigned32BitValue(), __ATOMIC_RELEASE);
+    const auto current = OSDynamicCast(OSNumber, linearBrightness->getObject("value"));
+    if (current != nullptr) {
+        __atomic_store_n(&singleton().curBacklightLvl, current->unsigned32BitValue(), __ATOMIC_RELEASE);
+    }
+    NRedECBacklight::setDisplayReady(__atomic_load_n(&singleton().curBacklightLvl, __ATOMIC_ACQUIRE),
+                                     maxBrightness->unsigned32BitValue());
 
     return true;
 }
@@ -162,17 +169,29 @@ bool Backlight::OnAppleBacklightDisplayLoad(void* const, void* const, IOService*
 IOReturn Backlight::wrapSetAttributeForConnection(IOService* const framebuffer, const IOIndex connectIndex,
                                                   const IOSelect attribute, const uintptr_t value)
 {
+    if (attribute == kIOAppleBacklightAttribute && NRedECBacklight::hasBackend()) {
+        if (value > 0xFFFFFFFF) { return kIOReturnBadArgument; }
+        const auto status = NRedECBacklight::queue(static_cast<UInt32>(value),
+                                                   __atomic_load_n(&singleton().maxBacklightLvl, __ATOMIC_ACQUIRE));
+        if (status == kIOReturnSuccess) {
+            __atomic_store_n(&singleton().curBacklightLvl, static_cast<UInt32>(value), __ATOMIC_RELEASE);
+            return status;
+        }
+        if (status != kIOReturnUnsupported) { return status; }
+    }
     const auto ret = FunctionCast(wrapSetAttributeForConnection, singleton().orgSetAttributeForConnection)(
         framebuffer, connectIndex, attribute, value);
     if (attribute != kIOAppleBacklightAttribute) { return ret; }
 
-    singleton().curBacklightLvl = static_cast<UInt32>(value);
+    const auto current = static_cast<UInt32>(value);
+    __atomic_store_n(&singleton().curBacklightLvl, current, __ATOMIC_RELEASE);
 
     if (singleton().embeddedPanelLink == nullptr) { return kIOReturnNoDevice; }
 
-    if (singleton().maxBacklightLvl == 0) { return kIOReturnInternalError; }
+    const auto maximum = __atomic_load_n(&singleton().maxBacklightLvl, __ATOMIC_ACQUIRE);
+    if (maximum == 0) { return kIOReturnInternalError; }
 
-    const auto percentage = singleton().curBacklightLvl * 100 / singleton().maxBacklightLvl;
+    const auto percentage = current * 100 / maximum;
 
     if (singleton().supportsAUX) {
         const auto auxValue = (singleton().maxBacklightMillinits * percentage) / 100;
@@ -193,10 +212,15 @@ IOReturn Backlight::wrapSetAttributeForConnection(IOService* const framebuffer, 
 IOReturn Backlight::wrapGetAttributeForConnection(IOService* framebuffer, IOIndex connectIndex, IOSelect attribute,
                                                   uintptr_t* value)
 {
+    if (attribute == kIOAppleBacklightAttribute && NRedECBacklight::hasBackend()) {
+        if (value == nullptr) { return kIOReturnBadArgument; }
+        *value = NRedECBacklight::currentLevel();
+        return kIOReturnSuccess;
+    }
     const auto ret = FunctionCast(wrapGetAttributeForConnection, singleton().orgGetAttributeForConnection)(
         framebuffer, connectIndex, attribute, value);
     if (attribute != kIOAppleBacklightAttribute) { return ret; }
-    *value = singleton().curBacklightLvl;
+    *value = __atomic_load_n(&singleton().curBacklightLvl, __ATOMIC_ACQUIRE);
     return kIOReturnSuccess;
 }
 

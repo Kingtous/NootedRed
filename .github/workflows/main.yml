@@ -57,9 +57,18 @@ jobs:
       - uses: actions/checkout@v7
         with:
           submodules: "recursive"
+      - name: Test EC backlight service
+        run: |
+          python3 tools/test_ec_backlight_service.py
+          python3 tools/test_ec_backlight_service.py --thread-sanitizer
       - run: xcodebuild -configuration Debug -arch x86_64 build
       - run: xcodebuild -configuration Research\ Release -arch x86_64 build
       - run: xcodebuild -configuration Release -arch x86_64 build
+      - name: Check IOKit class symbols
+        run: |
+          python3 tools/test_ec_backlight_binary.py build/Debug/NootedRed.kext
+          python3 tools/test_ec_backlight_binary.py 'build/Research Release/NootedRed.kext'
+          python3 tools/test_ec_backlight_binary.py build/Release/NootedRed.kext
       - name: Upload to Artifacts
         uses: actions/upload-artifact@v7
         with:
