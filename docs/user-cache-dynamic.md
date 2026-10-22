@@ -1,7 +1,11 @@
 # Tahoe 用户态动态缓存匹配
 
-`-NRedComputeScratch` 与 `-NRedVCN` 仍显式启用，系统入口复用作者的
-`KernelVersion::majorMatches(MACOS_26)`，限 Tahoe / Darwin 25.x。设备范围保持不变：
+macOS 14/15 的新增路径使用独立的精确缓存／页面配置，范围与参数见
+[多系统适配](macos-multi-os-compat.md)。以下动态匹配说明适用于 Tahoe。
+
+显示组使用 `-NRedDisplayFix`，视频组使用 `-NRedVideoFix`；
+旧分项参数不再读取，完整组合见 [启动参数](boot-arguments.md)。本文中的动态解析限 Tahoe / Darwin 25.x。
+设备范围保持不变：
 ComputeScratch 为 NRed 原生支持的六种 Vega APU；视频为四种 VCN 2.2 APU。
 
 公共组件按职责分两层：`UserSharedCache.hpp` 负责有读取预算的缓存元数据、映像与 Mach-O 解析；

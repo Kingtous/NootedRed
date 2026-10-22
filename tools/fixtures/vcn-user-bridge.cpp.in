@@ -10,6 +10,7 @@
 #include <array>
 #include "UserVideoDecodeData.hpp"
 #include "UserVideoDecodeResolver.hpp"
+#include <UserLegacyData.hpp>
 #include "VCNCapabilities.hpp"
 using user_addr_t=uint64_t;using mach_vm_address_t=uint64_t;using mach_vm_size_t=uint64_t;
 using vm_map_t=void*;using task_t=void*;using proc_t=void*;using natural_t=unsigned;
@@ -25,7 +26,7 @@ struct NRed {static NRed& singleton(){static NRed n;return n;}void setProp32(con
  unsigned getDeviceID(){return device; }static unsigned device;};unsigned NRed::device=0x1638;
 struct Version{unsigned major(){return majorValue;}unsigned minor(){return minorValue;}static unsigned majorValue,minorValue;};unsigned Version::majorValue=25;unsigned Version::minorValue=6;
 const PenguinWizardry::KernelVersion& currentKernelVersion(){static std::optional<PenguinWizardry::KernelVersion> current;return current.emplace(Version::majorValue,Version::minorValue);}
-static bool flag=true; static bool checkKernelArgument(const char* s){assert(strcmp(s,"-NRedVCN")==0);return flag;}
+static bool flag=true; static bool checkKernelArgument(const char* s){assert(strcmp(s,"-NRedVideoFix")==0);return flag;}
 namespace VCN { static bool active=true; bool allocated(){return active;} }
 #define IONew(T,N) (new T[N])
 #define IODelete(P,T,N) delete[] P
@@ -106,9 +107,9 @@ int main(){
   assert(properties.at("NRedVCNUserRejected")==(id==0x15D8||id==0x15DD?5:3));
  }
  NRed::device=0x1638;
- for(unsigned major:{24U,25U,26U})for(unsigned minor:{0U,6U,7U}){
+ for(unsigned major:{22U,23U,24U,25U,26U})for(unsigned minor:{0U,6U,7U}){
   Version::majorValue=major;Version::minorValue=minor;KernelPatcher checked;UserVideoDecode::init(checked);
-  assert(checked.routes==int(major==25));
+  assert(checked.routes==int(major>=23 && major<=25));
  }
  Version::majorValue=25;Version::minorValue=6;
  for(unsigned host:{0x15E7U,0x1636U,0x1638U,0x164CU}){

@@ -29,7 +29,10 @@ def main():
 #include <cstring>
 #include <map>
 #include <string>
-#include <VCNKernelData.hpp>
+#include <VCNKernelProfiles.hpp>
+struct Version {unsigned major()const{return kernelMajor;}static unsigned kernelMajor;};
+unsigned Version::kernelMajor=25;
+static Version currentKernelVersion(){return {};}
 using mach_vm_address_t=uintptr_t;
 #define SYSLOG(...) ((void)0)
 template<typename T,size_t N>constexpr size_t arrsize(const T(&)[N]){return N;}
@@ -43,8 +46,9 @@ int main(){
     alignas(8) std::array<uint8_t,8192> memory{};
     const auto base=reinterpret_cast<uintptr_t>(memory.data());
     KernelPatcher patcher;
-    for(bool old:{false,true}){
-        const auto* guards=old?VCNKernelData::Guards5000:VCNKernelData::Guards6000;
+    for(unsigned major:{23U,24U,25U})for(bool old:{false,true}){
+        Version::kernelMajor=major;
+        const auto* guards=VCNKernelProfiles::guards(major,old);
         const auto* table=old?VCNKernelData::Table5000:VCNKernelData::Table6000;
         const auto reset=[&]{
             memory.fill(0);patcher.symbols.clear();patcher.symbols[table]=base+256;

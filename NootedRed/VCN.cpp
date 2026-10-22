@@ -9,6 +9,7 @@
 #include <VCN.hpp>
 #include <VCNCapabilities.hpp>
 #include <VCNKernelData.hpp>
+#include <VCNKernelProfiles.hpp>
 #include <libkern/OSKextLib.h>
 #include <libkern/c++/OSMetaClass.h>
 
@@ -103,7 +104,8 @@ namespace
     bool verifyKernelABI(KernelPatcher& patcher, size_t id, mach_vm_address_t slide, size_t size, bool old)
     {
         if (size < 16 || slide > ~mach_vm_address_t{0} - size) { return false; }
-        const auto* guards = old ? VCNKernelData::Guards5000 : VCNKernelData::Guards6000;
+        const auto* guards = VCNKernelProfiles::guards(currentKernelVersion().major(), old);
+        if (!guards) { return false; }
         static_assert(arrsize(VCNKernelData::Guards5000) == arrsize(VCNKernelData::Guards6000));
         mach_vm_address_t table{0};
         if (!resolve(patcher, id, old ? VCNKernelData::Table5000 : VCNKernelData::Table6000, table, slide, size)) {
@@ -188,16 +190,27 @@ namespace
     bool install(KernelPatcher& patcher, size_t id, mach_vm_address_t slide, size_t size)
     {
         if (size < 6 || slide > ~mach_vm_address_t{0} - size) { return false; }
-        mach_vm_address_t addresses[arrsize(VCNKernelData::Patches)]{};
+        size_t      patchCount{0};
+        const auto* patches = VCNKernelProfiles::patches(currentKernelVersion().major(), patchCount);
+        if (!patches || patchCount == 0 || patchCount > 32) { return false; }
+        mach_vm_address_t addresses[32]{};
         mach_vm_address_t signal{0};
         if (!resolve(patcher, id, "__ZN26AMDRadeonX6000_AMDHardware22signalGPUWorkSubmittedEv", signal, slide, size)) {
             return false;
         }
-        for (size_t i = 0; i < arrsize(VCNKernelData::Patches); ++i) {
-            const auto&       patch = VCNKernelData::Patches[i];
+        for (size_t i = 0; i < patchCount; ++i) {
+            const auto&       patch = patches[i];
             mach_vm_address_t function{0};
             if (!resolve(patcher, id, patch.symbol, function, slide, size)) { return false; }
             addresses[i] = function + patch.offset;
+            if (patch.newSlot == 0) {
+                const auto next = addresses[i] + 5;
+                if (next < addresses[i]
+                    || (signal >= next ? signal - next > 0x7FFFFFFFULL : next - signal > 0x80000000ULL))
+                {
+                    return false;
+                }
+            }
             if (function > ~mach_vm_address_t{0} - patch.offset || addresses[i] < slide
                 || addresses[i] > slide + size - sizeof(patch.original)
                 || memcmp(reinterpret_cast<void*>(addresses[i]), patch.original, sizeof(patch.original)))
@@ -207,8 +220,8 @@ namespace
             }
         }
         if (MachInfo::setKernelWriting(true, KernelPatcher::kernelWriteLock) != KERN_SUCCESS) { return false; }
-        for (size_t i = 0; i < arrsize(VCNKernelData::Patches); ++i) {
-            const auto& patch = VCNKernelData::Patches[i];
+        for (size_t i = 0; i < patchCount; ++i) {
+            const auto& patch = patches[i];
             UInt8       replacement[6];
             memcpy(replacement, patch.original, sizeof(replacement));
             if (patch.newSlot) { memcpy(replacement + 2, &patch.newSlot, sizeof(patch.newSlot)); }
@@ -232,8 +245,8 @@ namespace
         if (!patcher.routeMultiple(id, routes, arrsize(routes), slide, size)) {
             patcher.clearError();
             if (MachInfo::setKernelWriting(true, KernelPatcher::kernelWriteLock) == KERN_SUCCESS) {
-                for (size_t i = 0; i < arrsize(VCNKernelData::Patches); ++i) {
-                    memcpy(reinterpret_cast<void*>(addresses[i]), VCNKernelData::Patches[i].original, 6);
+                for (size_t i = 0; i < patchCount; ++i) {
+                    memcpy(reinterpret_cast<void*>(addresses[i]), patches[i].original, 6);
                 }
                 MachInfo::setKernelWriting(false, KernelPatcher::kernelWriteLock);
             }
@@ -246,7 +259,7 @@ namespace
 
 void VCN::init()
 {
-    requested = checkKernelArgument("-NRedVCN");
+    requested = checkKernelArgument("-NRedVideoFix");
     if (requested) { lilu.onKextLoadForce(&x6000); }
 }
 bool VCN::ready()

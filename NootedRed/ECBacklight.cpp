@@ -49,7 +49,7 @@ NRedECBacklight* NRedECBacklight::owner        = nullptr;
 IOService* NRedECBacklight::probe(IOService* provider, SInt32* score)
 {
     int mode = 0;
-    PE_parse_boot_argn("NRedECBacklight", &mode, sizeof(mode));
+    PE_parse_boot_argn("NRedECFix", &mode, sizeof(mode));
     bool enabled = true;
     PE_parse_boot_argn("AMDBacklight", &enabled, sizeof(enabled));
     if (!enabled || (mode != 1 && mode != 2) || checkKernelArgument("-NRedOff")

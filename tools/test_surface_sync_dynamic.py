@@ -27,7 +27,12 @@ def main():
 namespace Patch {} // 模拟 Lilu 的同名命名空间，防止独立测试遗漏集成歧义。
 #include <UserSurfaceSyncData.hpp>
 #include <UserSurfaceSyncResolver.hpp>
+#include <UserLegacyData.hpp>
 #include <UserSubmitGuardData.hpp>
+namespace Buffer {
+template<class T>T* create(size_t count){return new T[count];}
+template<class T>void deleter(T* pointer){delete[] pointer;}
+}
 using namespace UserSurfaceSyncData;
 using user_addr_t=uint64_t;using mach_vm_address_t=uint64_t;using mach_vm_size_t=uint64_t;
 using vm_map_t=void*;using task_t=void*;using proc_t=void*;using natural_t=unsigned;
@@ -45,7 +50,7 @@ struct NRed{static NRed& singleton(){static NRed n;return n;}void setProp32(cons
  unsigned getDeviceID(){return device;}static unsigned device;};unsigned NRed::device=0x15e7;
 struct Version{unsigned major(){return 25;}unsigned minor(){return 0;}bool majorMatches(unsigned v){return v==25;}};
 constexpr unsigned MACOS_26=25;static Version currentKernelVersion(){return {};}
-static bool checkKernelArgument(const char*s){return strcmp(s,"-NRedLegacyBlend")==0||strcmp(s,"-NRedNoSubmitGuard")==0;}
+static bool checkKernelArgument(const char*s){return strcmp(s,"-NRedDisplayFix")==0;}
 struct KernelPatcher{static constexpr int KernelID=0;struct RouteRequest{template<typename T>RouteRequest(const char*,T,uint64_t&) {}};
  uint64_t solveSymbol(int,const char*){return 1;}void clearError(){}bool routeMultipleLong(int,RouteRequest*,int){return true;}};
 namespace UserSurfaceSync{void init(KernelPatcher&);}
@@ -90,7 +95,7 @@ static void reset(unsigned device=0x15e7){
  properties.clear();pageProtections.clear();failedProtect.clear();protects=writes=failWrite=regionFail=reads=originalCalls=0;
  failedRead=0;noMap=false;seenStages=appliedCount=errorCount=windowServerCount=weatherCount=0;
  NRed::device=device;KernelPatcher patcher;UserSurfaceSync::init(patcher);assert(properties.at("NRedImmediateSyncRevision")==4);
- assert(devicePatches);legacyBlend=srdShared=true;computeScratch=false;
+ assert(devicePatches);legacyBlend=srdShared=true;computeScratch=submitGuard=false;
  memset(memory.data(),0,memory.size());copy(0,CacheMagic,16);put32(16,0x300);put32(20,1);
  // 改变 UUID、缓存 slide、映像位置及三个补丁入口，代码仍为相同驱动实现。
  memset(memory.data()+88,0xa7,16);put64(224,unslid);put64(232,memory.size());put64(240,slide);

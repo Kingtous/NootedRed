@@ -268,11 +268,17 @@ int main()
     assert(NRedECBacklight::queue(10, 100) == kIOReturnUnsupported);
     NRedECBacklight service;
     assert(!service.probe(&device, &score));
-    bootArgs = {{"NRedECBacklight", 1}, {"-NRedOff", 1}};
-    assert(!service.probe(&device, &score));
-    bootArgs = {{"NRedECBacklight", 1}, {"AMDBacklight", 0}};
-    assert(!service.probe(&device, &score));
+    for (int mode : {-1, 0, 3, 256, 257}) {
+        bootArgs = {{"NRedECFix", mode}};
+        assert(!service.probe(&device, &score));
+    }
     bootArgs = {{"NRedECBacklight", 1}};
+    assert(!service.probe(&device, &score));
+    bootArgs = {{"NRedECFix", 1}, {"-NRedOff", 1}};
+    assert(!service.probe(&device, &score));
+    bootArgs = {{"NRedECFix", 1}, {"AMDBacklight", 0}};
+    assert(!service.probe(&device, &score));
+    bootArgs = {{"NRedECFix", 1}};
     assert(service.probe(&device, &score) == &service);
     assert(service.start(&device));
     auto timer = IOTimerEventSource::last;
@@ -390,7 +396,7 @@ int main()
         assert(wide.lastLevel == UINT32_MAX);
         wideService.stop(&wide);
     }
-    bootArgs = {{"NRedECBacklight", 2}};
+    bootArgs = {{"NRedECFix", 2}};
     {
         IOACPIPlatformDevice forced;
         forced.source = 1;

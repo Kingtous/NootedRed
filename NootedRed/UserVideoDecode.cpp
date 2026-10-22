@@ -3,6 +3,7 @@
 #include <IOKit/IOLib.h>
 #include <NRed.hpp>
 #include <PenguinWizardry/KernelVersion.hpp>
+#include <UserLegacyData.hpp>
 #include <UserPatchPolicy.hpp>
 #include <UserVideoDecode.hpp>
 #include <UserVideoDecodeData.hpp>
@@ -37,6 +38,7 @@ namespace
     CopyOut           writeUser{nullptr};
     UInt32            seenStages{0}, appliedCount{0}, errorCount{0};
     const UserVideoDecodeData::Patch* devicePatches{nullptr};
+    const UserLegacyCompat::Profile*  legacyProfile{nullptr};
     constexpr auto    PatchCount = arrsize(UserVideoDecodeData::Patches);
     constexpr UInt32                  MaxPageCount = PatchCount * 2;
     static_assert(PatchCount <= 32 && UserVideoDecodeData::PageCount <= 16);
@@ -249,7 +251,16 @@ namespace
         }
         using namespace UserVideoDecodeData;
         const auto*       patches    = devicePatches;
-        const auto        patchCount = PatchCount;
+        const UInt32      patchCount = legacyProfile ? legacyProfile->patchCount : static_cast<UInt32>(PatchCount);
+        UserVideoDecodeData::Patch legacyPatches[PatchCount];
+        if (legacyProfile) {
+            if (patchCount > PatchCount) { return result; }
+            for (UInt32 i = 0; i < patchCount; ++i) {
+                const auto& patch = legacyProfile->patches[i];
+                legacyPatches[i]  = {patch.offset, patch.original, patch.patched, patch.size};
+            }
+            patches = legacyPatches;
+        }
         UInt64            base{0};
         UInt8             header[104];
         if (readUser(args->startAddress, &base, sizeof(base)) != 0 || base == 0
@@ -271,7 +282,12 @@ namespace
             memcpy(&value, header + 88 + i * 4, sizeof(value));
             NRed::singleton().setProp32(uuidKeys[i], value);
         }
-        const bool    dynamic = memcmp(header + 88, CacheUUID, sizeof(CacheUUID)) != 0;
+        if (legacyProfile && !UserLegacyCompat::matches(readUser, base, header + 88, *legacyProfile)) {
+            stage(Stage::CacheMismatch);
+            NRed::singleton().setProp32("NRedVCNUserLegacyRejected", 1);
+            return result;
+        }
+        const bool    dynamic = !legacyProfile && memcmp(header + 88, CacheUUID, sizeof(CacheUUID)) != 0;
         DynamicBuffer dynamicBuffer(dynamic);
         if (dynamic) {
             if (!dynamicBuffer.plan) {
@@ -401,7 +417,7 @@ namespace
 
 void UserVideoDecode::init(KernelPatcher& patcher)
 {
-    if (!checkKernelArgument("-NRedVCN")) { return; }
+    if (!checkKernelArgument("-NRedVideoFix")) { return; }
     const auto  deviceID   = NRed::singleton().getDeviceID();
     const auto* capability = VCNCapabilities::findDevice(deviceID);
     const auto  rejected   = VCNCapabilities::rejection(deviceID, currentKernelVersion());
@@ -416,6 +432,7 @@ void UserVideoDecode::init(KernelPatcher& patcher)
         return;
     }
     devicePatches = UserVideoDecodeData::findDevice(deviceID);
+    legacyProfile = UserLegacyData::video(currentKernelVersion().major(), deviceID);
     if (!devicePatches) {
         NRed::singleton().setProp32("NRedVCNUserRejected", 3);
         return;

@@ -23,12 +23,13 @@ EC 已接管时，亮度读写都跳过 AMD 的原处理函数。未找到支持
 
 ## 参数
 
-- `NRedECBacklight=0` 或省略：不启动 EC 服务。
-- `NRedECBacklight=1`：使用固件报告的 EC 来源。
-- `NRedECBacklight=2`：请求切换到 EC，检查固件调用结果和报告来源后启用。本机来源读取固定返回 2，不能据此确认实际控制权切换。
+- `NRedECFix=0` 或省略：不启动 EC 服务。
+- `NRedECFix=1`：使用固件报告的 EC 来源。
+- `NRedECFix=2`：请求切换到 EC，检查固件调用结果和报告来源后启用。本机来源读取固定返回 2，不能据此确认实际控制权切换。
 - `AMDBacklight=0` 或 `-NRedOff`：不启动 EC 服务。
 
-旧版的 `NRedECBacklightProbe`、`-NRedECBacklightTrace` 在此实现中没有作用。
+旧版 `NRedECBacklight`、`NRedECBacklightProbe`、`-NRedECBacklightTrace` 不再读取。
+三项修复的统一入口见 [启动参数](boot-arguments.md)。
 
 ## 验证与边界
 

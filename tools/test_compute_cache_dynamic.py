@@ -29,6 +29,10 @@ def main():
     harness = preamble + r'''
 #include "user-cache-dynamic.hpp"
 #include <UserSubmitGuardData.hpp>
+namespace Buffer {
+template<class T>T* create(size_t count){return new T[count];}
+template<class T>void deleter(T* pointer){delete[] pointer;}
+}
 constexpr int KERN_INVALID_ADDRESS=1,KERN_PROTECTION_FAILURE=2,VM_FLAGS_ANYWHERE=1;
 using vm_address_t=uint64_t;
 static kern_return_t vm_allocate(vm_map_t,vm_address_t* page,unsigned,int){*page=0;return KERN_FAILURE;}
@@ -48,7 +52,7 @@ static uint64_t initAddress,overrideAddress,constructorAddress,settingsAddress,d
 static void setup(unsigned id){
  using namespace UserSurfaceSyncData;
  cache(ScratchResolverData::ResolverImages,ScratchResolverData::ResolverFunctions);
- devicePatches=findDevice(id);assert(devicePatches);computeScratch=legacyBlend=srdShared=true;
+ devicePatches=findDevice(id);assert(devicePatches);renderRequested=computeScratch=legacyBlend=srdShared=true;
  auto image=imageAddresses[0];initAddress=image+0x21f80;overrideAddress=image+0x23ff8;constructorAddress=image+0x28fe5;
  settingsAddress=image+0x26000;dumpAddress=image+0x27000;
  put(initAddress,Original0,sizeof(Original0));put(overrideAddress,Original1,sizeof(Original1));

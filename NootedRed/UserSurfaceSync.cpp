@@ -2,14 +2,15 @@
 #include <Headers/kern_util.hpp>
 #include <NRed.hpp>
 #include <PenguinWizardry/KernelVersion.hpp>
+#include <UserLegacyData.hpp>
+#include <UserSubmitGuardData.hpp>
 #include <UserSurfaceSync.hpp>
 #include <UserSurfaceSyncData.hpp>
 #include <UserSurfaceSyncResolver.hpp>
-#include <UserSubmitGuardData.hpp>
 #include <kern/task.h>
+#include <mach/i386/vm_param.h>
 #include <mach/vm_map.h>
 #include <mach/vm_region.h>
-#include <mach/i386/vm_param.h>
 #include <sys/proc.h>
 
 namespace {
@@ -33,7 +34,9 @@ CopyIn readUser{nullptr};
 CopyOut writeUser{nullptr};
 UInt32 seenStages{0}, appliedCount{0}, errorCount{0}, windowServerCount{0}, weatherCount{0};
 UInt32 submitGuardCount{0};
-bool srdShared{false}, legacyBlend{false}, computeScratch{false}, submitGuard{false};
+bool              srdShared{false}, legacyBlend{false}, computeScratch{false}, submitGuard{false};
+bool              renderRequested{false};
+const UserLegacyCompat::Profile*           legacyProfile{nullptr};
 const UserSurfaceSyncData::DevicePatchSet* devicePatches{&UserSurfaceSyncData::DevicePatches[0]};
 
 constexpr auto PatchCount = arrsize(UserSurfaceSyncData::ComputeScratchPatches);
@@ -141,16 +144,47 @@ kern_return_t installSubmitGuard(vm_map_t map, const UInt64 base, bool& fresh)
 {
     using namespace UserSubmitGuardData;
     fresh = false;
-    const UInt64 method = base + MethodOffset;
+    const auto offset = legacyProfile ? UserLegacyData::submitOffset(legacyProfile->major) : MethodOffset;
+    if (offset == 0 || base >= UserSharedCache::UserLimit || offset >= UserSharedCache::UserLimit - base
+        || MethodPatchSize > UserSharedCache::UserLimit - base - offset)
+    {
+        return KERN_INVALID_ADDRESS;
+    }
+    const UInt64 method = base + offset;
     UInt8 entry[MethodPatchSize];
     if (readUser(method, entry, sizeof(entry)) != 0) { return KERN_INVALID_ADDRESS; }
     static constexpr UInt8 patchedPrefix[6] = {0xFF, 0x25, 0x00, 0x00, 0x00, 0x00};
-    if (memcmp(entry, patchedPrefix, sizeof(patchedPrefix)) == 0) { return KERN_SUCCESS; }
+    if (memcmp(entry, patchedPrefix, sizeof(patchedPrefix)) == 0) {
+        UInt64 target{0};
+        memcpy(&target, entry + 6, sizeof(target));
+        if (entry[14] != 0x90 || target == 0 || (target & (PAGE_SIZE - 1)) != 0
+            || target >= UserSharedCache::UserLimit - sizeof(Payload))
+        {
+            return KERN_INVALID_ARGUMENT;
+        }
+        UInt8 existing[sizeof(Payload)], expected[sizeof(Payload)];
+        memcpy(expected, Payload, sizeof(expected));
+        const UInt64 continuation = method + MethodPatchSize;
+        memcpy(expected + PayloadJumpOffset, &continuation, sizeof(continuation));
+        vm_prot_t protection{VM_PROT_NONE};
+        return readUser(target, existing, sizeof(existing)) == 0 && memcmp(existing, expected, sizeof(existing)) == 0
+                       && leafProtection(map, target, protection) && protection == (VM_PROT_READ | VM_PROT_EXECUTE) ?
+                   KERN_SUCCESS :
+                   KERN_INVALID_ARGUMENT;
+    }
     if (memcmp(entry, MethodOriginal, sizeof(entry)) != 0) { return KERN_INVALID_ARGUMENT; }
+    const UInt64 methodPage = method & ~static_cast<UInt64>(PAGE_SIZE - 1);
+    vm_prot_t    protection{VM_PROT_NONE};
+    if ((method & (PAGE_SIZE - 1)) + sizeof(entry) > PAGE_SIZE || !leafProtection(map, methodPage, protection)
+        || protection != (VM_PROT_READ | VM_PROT_EXECUTE))
+    {
+        return KERN_PROTECTION_FAILURE;
+    }
 
     vm_address_t page{0};
     auto result = vm_allocate(map, &page, PAGE_SIZE, VM_FLAGS_ANYWHERE);
     if (result != KERN_SUCCESS) { return result; }
+
     UInt8 payload[sizeof(Payload)];
     memcpy(payload, Payload, sizeof(payload));
     const UInt64 continuation = method + MethodPatchSize;
@@ -160,6 +194,7 @@ kern_return_t installSubmitGuard(vm_map_t map, const UInt64 base, bool& fresh)
         return KERN_FAILURE;
     }
     result = vm_protect(map, page, PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+    if (result == KERN_SUCCESS) { result = vm_protect(map, page, PAGE_SIZE, TRUE, VM_PROT_READ | VM_PROT_EXECUTE); }
     if (result != KERN_SUCCESS) {
         vm_deallocate(map, page, PAGE_SIZE);
         return result;
@@ -172,23 +207,42 @@ kern_return_t installSubmitGuard(vm_map_t map, const UInt64 base, bool& fresh)
     const UInt64 target = page;
     memcpy(patch + 6, &target, sizeof(target));
 
-    const UInt64 methodPage = method & ~static_cast<UInt64>(PAGE_SIZE - 1);
-    vm_prot_t protection{VM_PROT_NONE};
-    if (!leafProtection(map, methodPage, protection)
-        || protection != (VM_PROT_READ | VM_PROT_EXECUTE)) { return KERN_PROTECTION_FAILURE; }
     result = vm_protect(map, methodPage, PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
-    if (result != KERN_SUCCESS) { return result; }
+    if (result != KERN_SUCCESS) {
+        vm_deallocate(map, page, PAGE_SIZE);
+        return result;
+    }
     const auto written = writeUser(patch, method, sizeof(patch));
-    // 先恢复当前权限，再下调最大权限；下调失败时保留补丁并记录错误。
+    bool       rolledBack = false;
+    if (written != 0) { rolledBack = writeUser(entry, method, sizeof(entry)) == 0; }
     auto restored = vm_protect(map, methodPage, PAGE_SIZE, FALSE, protection);
     if (restored != KERN_SUCCESS) {
         restored = vm_protect(map, methodPage, PAGE_SIZE, FALSE, protection);
     }
     if (restored == KERN_SUCCESS) {
         const auto maximum = vm_protect(map, methodPage, PAGE_SIZE, TRUE, protection);
-        if (maximum != KERN_SUCCESS) { error(maximum); }
+        if (maximum != KERN_SUCCESS) {
+            error(maximum);
+            restored = maximum;
+        }
     }
-    if (written != 0 || restored != KERN_SUCCESS) { return KERN_FAILURE; }
+    if (written != 0 || restored != KERN_SUCCESS) {
+        if (!rolledBack
+            && vm_protect(map, methodPage, PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY)
+                   == KERN_SUCCESS)
+        {
+            rolledBack = writeUser(entry, method, sizeof(entry)) == 0;
+        }
+        auto recovered = vm_protect(map, methodPage, PAGE_SIZE, FALSE, protection);
+        if (recovered != KERN_SUCCESS) { recovered = vm_protect(map, methodPage, PAGE_SIZE, FALSE, protection); }
+        if (recovered == KERN_SUCCESS) { recovered = vm_protect(map, methodPage, PAGE_SIZE, TRUE, protection); }
+        if (rolledBack) { vm_deallocate(map, page, PAGE_SIZE); }
+        // 无法确认入口恢复时保留目标页，避免残留跳转指向已释放内存。
+        if (!rolledBack || recovered != KERN_SUCCESS) {
+            NRed::singleton().setProp32("NRedSubmitGuardRollbackFailed", 1);
+        }
+        return KERN_FAILURE;
+    }
     fresh = true;
     return KERN_SUCCESS;
 }
@@ -199,7 +253,9 @@ bool rollback(vm_map_t map, Page* pages, const UInt32 pageCount, const UInt64 ba
 {
     using namespace UserSurfaceSyncData;
     bool ok = true;
-    for (UInt32 i = 0; i < touched; ++i) {
+    // 最后安装的调用跳转先恢复，再撤回其目标代码。
+    for (UInt32 remaining = touched; remaining > 0; --remaining) {
+        const auto i = remaining - 1;
         const auto address = base + patches[i].offset;
         const auto first   = address & ~static_cast<UInt64>(PAGE_SIZE - 1);
         const auto last    = (address + patches[i].size - 1) & ~static_cast<UInt64>(PAGE_SIZE - 1);
@@ -249,7 +305,19 @@ int wrappedSharedRegionCheck(proc_t process, SharedRegionCheckArgs* args, int* r
     if (args == nullptr || args->startAddress == 0) { stage(Stage::Argument); return result; }
     using namespace UserSurfaceSyncData;
     const auto* patches = activePatches();
-    const auto  patchCount = computeScratch ? PatchCount : (legacyBlend ? LegacyPatchCount : BaselinePatchCount);
+    UInt32      patchCount =
+        legacyProfile ?
+                 legacyProfile->patchCount :
+                 static_cast<UInt32>(computeScratch ? PatchCount : (legacyBlend ? LegacyPatchCount : BaselinePatchCount));
+    UserSurfaceSyncData::Patch combined[PatchCount];
+    if (legacyProfile) {
+        if (patchCount > PatchCount) { return result; }
+        for (UInt32 i = 0; i < patchCount; ++i) {
+            const auto& patch = legacyProfile->patches[i];
+            combined[i]       = {patch.offset, patch.original, patch.patched, patch.size};
+        }
+        patches = combined;
+    }
     UInt64      base{0};
     UInt8       header[104];
     if (readUser(args->startAddress, &base, sizeof(base)) != 0 || base == 0
@@ -263,7 +331,7 @@ int wrappedSharedRegionCheck(proc_t process, SharedRegionCheckArgs* args, int* r
         stage(Stage::CacheMismatch);
         return result;
     }
-    const bool                    dynamic = memcmp(header + 88, CacheUUID, sizeof(CacheUUID)) != 0;
+    const bool                    dynamic = !legacyProfile && memcmp(header + 88, CacheUUID, sizeof(CacheUUID)) != 0;
     UserSurfaceSyncResolver::Plan plan;
     const char* const             uuidKeys[] = {"NRedImmediateSyncCacheUUID0", "NRedImmediateSyncCacheUUID1",
                                                 "NRedImmediateSyncCacheUUID2", "NRedImmediateSyncCacheUUID3"};
@@ -273,7 +341,8 @@ int wrappedSharedRegionCheck(proc_t process, SharedRegionCheckArgs* args, int* r
         NRed::singleton().setProp32(uuidKeys[i], value);
     }
     // 提交守卫不依赖渲染修复模式，但只在缓存与核验偏移一致的进程里安装。
-    if (!dynamic && submitGuard) {
+    const bool knownCache = legacyProfile ? memcmp(header + 88, legacyProfile->uuid, 16) == 0 : !dynamic;
+    if (knownCache && submitGuard) {
         if (auto map = getTaskMap(current_task())) {
             bool fresh{false};
             const auto installed = installSubmitGuard(map, base, fresh);
@@ -301,6 +370,12 @@ int wrappedSharedRegionCheck(proc_t process, SharedRegionCheckArgs* args, int* r
             }
         }
     }
+    if (!renderRequested) { return result; }
+    if (legacyProfile && !UserLegacyCompat::matches(readUser, base, header + 88, *legacyProfile)) {
+        stage(Stage::CacheMismatch);
+        NRed::singleton().setProp32("NRedLegacyBlendRejected", 1);
+        return result;
+    }
     if (dynamic) {
         if (!UserSurfaceSyncResolver::resolve(readUser, base, *devicePatches, srdShared, legacyBlend, plan,
                                               computeScratch))
@@ -324,7 +399,7 @@ int wrappedSharedRegionCheck(proc_t process, SharedRegionCheckArgs* args, int* r
     }
 
     // 禁止在残留另一策略的进程中把旧模式误报为已生效；切换参数仍需重启。
-    if (!dynamic && !computeScratch) {
+    if (!legacyProfile && !dynamic && !computeScratch) {
         UInt8 ctx[MaxPatchSize];
         for (UInt32 i = patchCount; i < PatchCount; ++i) {
             const auto& extra = ComputeScratchPatches[i];
@@ -482,28 +557,23 @@ int wrappedSharedRegionCheck(proc_t process, SharedRegionCheckArgs* args, int* r
 
 void UserSurfaceSync::init(KernelPatcher& patcher)
 {
-    submitGuard = !checkKernelArgument("-NRedNoSubmitGuard");
+    legacyProfile   = UserLegacyData::metal(currentKernelVersion().major());
+    renderRequested = false;
+    submitGuard     = checkKernelArgument("-NRedDisplayFix");
+    legacyBlend = renderRequested = submitGuard;
+    computeScratch = srdShared = submitGuard && currentKernelVersion().majorMatches(MACOS_26);
+    NRed::singleton().setProp32("NRedDisplayFixVersion", 1);
     NRed::singleton().setProp32("NRedSubmitGuardVersion", 1);
-    if (submitGuard) {
-        NRed::singleton().setProp32("NRedSubmitGuardEnabled", 1);
-        NRed::singleton().setProp32("NRedSubmitGuardRevision", 5);
-    }
-    else { NRed::singleton().setProp32("NRedSubmitGuardDisabled", 1); }
+    NRed::singleton().setProp32("NRedSubmitGuardRevision", 6);
     NRed::singleton().setProp32("NRedImmediateSyncVersion", 1);
     NRed::singleton().setProp32("NRedImmediateSyncRevision", 4);
     NRed::singleton().setProp32("NRedSrdSharedVersion", 1);
     NRed::singleton().setProp32("NRedLegacyBlendVersion", 1);
     NRed::singleton().setProp32("NRedComputeScratchVersion", 1);
-    NRed::singleton().setProp32("NRedTransfer1x1Version", 2);
-    const bool withdrawnRequested = checkKernelArgument("-NRedTransfer1x1");
-    computeScratch = checkKernelArgument("-NRedComputeScratch") || withdrawnRequested;
-    if (withdrawnRequested) {
-        NRed::singleton().setProp32("NRedTransfer1x1Redirected", 1);
-        SYSLOG("UserSurfaceSync", "Transfer1x1 withdrawn: using device-gated ComputeScratch-v1 instead");
+    if (!renderRequested) {
+        NRed::singleton().setProp32("NRedSubmitGuardDisabled", 1);
+        return;
     }
-    legacyBlend = checkKernelArgument("-NRedLegacyBlend") || computeScratch;
-    srdShared = checkKernelArgument("-NRedSrdShared") || legacyBlend;
-    if (!checkKernelArgument("-NRedImmediateSync") && !srdShared) { return; }
     NRed::singleton().setProp32("NRedImmediateSyncRequested", 1);
     const auto deviceID = NRed::singleton().getDeviceID();
     devicePatches       = UserSurfaceSyncData::findDevice(deviceID);
@@ -512,10 +582,9 @@ void UserSurfaceSync::init(KernelPatcher& patcher)
         SYSLOG("UserSurfaceSync", "Unsupported render-fix device: 0x%X", deviceID);
         return;
     }
-    // Tahoe 小版本只决定是否进入核验；未知 UUID 必须通过完整驱动内容与引用目标核验。
-    if (!currentKernelVersion().majorMatches(MACOS_26)) {
+    if (!currentKernelVersion().majorMatches(MACOS_26) && !legacyProfile) {
         NRed::singleton().setProp32("NRedImmediateSyncRejected", 4);
-        SYSLOG("UserSurfaceSync", "Render fix requires Darwin 25; found %u.%u", currentKernelVersion().major(),
+        SYSLOG("UserSurfaceSync", "Metal fix requires Darwin 23/24/25; found %u.%u", currentKernelVersion().major(),
                currentKernelVersion().minor());
         return;
     }
@@ -535,9 +604,11 @@ void UserSurfaceSync::init(KernelPatcher& patcher)
     if (!patcher.routeMultipleLong(KernelPatcher::KernelID, &request, 1)) {
         patcher.clearError(); NRed::singleton().setProp32("NRedImmediateSyncRejected", 2); return;
     }
-    NRed::singleton().setProp32("NRedImmediateSyncEnabled", 1);
+    NRed::singleton().setProp32("NRedDisplayFixEnabled", 1);
+    if (renderRequested && !legacyProfile) { NRed::singleton().setProp32("NRedImmediateSyncEnabled", 1); }
     NRed::singleton().setProp32("NRedImmediateSyncRegionQueryVersion", 1);
     if (submitGuard) {
+        NRed::singleton().setProp32("NRedSubmitGuardEnabled", 1);
         SYSLOG("UserSurfaceSync", "SubmitGuard-v1 enabled: command-buffer free tails become PM4 fillers");
     }
     if (srdShared) {
@@ -553,6 +624,6 @@ void UserSurfaceSync::init(KernelPatcher& patcher)
         SYSLOG("UserSurfaceSync", "ComputeScratch-v1 enabled: single-SE scratch sizing; native kernel preserved; "
                "exact cache/code required");
     }
-    SYSLOG("UserSurfaceSync", "ImmediateSync-v1 revision 4 enabled: verified driver content required, device 0x%X",
-           deviceID);
+    SYSLOG("UserSurfaceSync", "Metal hooks enabled: Darwin %u, device 0x%X, render=%u submit=%u",
+           currentKernelVersion().major(), deviceID, renderRequested, submitGuard);
 }
