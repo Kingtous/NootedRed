@@ -854,7 +854,7 @@ def main() -> int:
     manifest = collect_manifest(root, args, metadata, chromium, vda, warnings)
 
     if args.zip:
-        archive_path = root.with_suffix(".zip")
+        archive_path = root.with_name(f"{root.name}.zip")
         with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
             for path in sorted(root.rglob("*")):
                 if path.is_file():
