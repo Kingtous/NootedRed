@@ -1,6 +1,7 @@
 """编译实际 Metal/VCN 桥接，注入旧系统缓存与提交守卫失败路径；不访问 GPU。"""
 import argparse
 from pathlib import Path
+from user_patch_memory_harness import with_memory_helpers
 import re
 import subprocess
 
@@ -178,6 +179,7 @@ def main():
         source = (ROOT / f'NootedRed/{module}.cpp').read_text()
         body = re.split(r'namespace\s*\{', source, maxsplit=1)[1]
         body = re.split(r'}\s*// namespace', body, maxsplit=1)[0]
+        body = with_memory_helpers(body)
         init = source[source.index(f'void {module}::init('):]
         main_code = RENDER.replace('MODULE', module).replace('PROFILE',
             'UserLegacyData::metal(major)' if module == 'UserSurfaceSync' else 'UserLegacyData::video(major,device)')

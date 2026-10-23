@@ -1,5 +1,6 @@
 """编译实际内核桥接与解析器，用兼容但重排的缓存检验匹配、拒绝和跨页回滚。"""
 from pathlib import Path
+from user_patch_memory_harness import with_memory_helpers
 import subprocess
 import sys
 
@@ -10,6 +11,7 @@ WORK = ROOT / 'build/user-surface-sync/dynamic'
 def main():
     source = (ROOT / 'NootedRed/UserSurfaceSync.cpp').read_text()
     body = source.split('namespace {', 1)[1].split('} // namespace', 1)[0]
+    body = with_memory_helpers(body)
     init = source[source.index('void UserSurfaceSync::init('):]
     stubs = WORK / 'stubs/IOKit'
     stubs.mkdir(parents=True, exist_ok=True)

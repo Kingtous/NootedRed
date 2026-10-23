@@ -1,5 +1,6 @@
 """编译真实 Metal 桥接，验证六种核显的动态 Scratch 及撤回策略拒绝。"""
 from pathlib import Path
+from user_patch_memory_harness import with_memory_helpers
 import subprocess
 import sys
 
@@ -22,6 +23,7 @@ def main():
     if '--baseline' in sys.argv:
         source = subprocess.check_output(['git','show','6c7b0804b5b115052fab5914eecfad7090b53eb1:NootedRed/UserSurfaceSync.cpp'],cwd=ROOT,text=True)
     body = source.split('namespace {', 1)[1].split('} // namespace', 1)[0]
+    body = with_memory_helpers(body)
     template = (ROOT / 'tools/fixtures/vcn-user-bridge.cpp.in').read_text()
     preamble = template[:template.index('static bool isWindowServer')]
     preamble = preamble.replace('#include "UserVideoDecodeData.hpp"\n#include "UserVideoDecodeResolver.hpp"',

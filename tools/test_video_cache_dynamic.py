@@ -1,5 +1,6 @@
 """编译真实视频桥接，验证未知 UUID、重排、绑定与跨页事务。"""
 from pathlib import Path
+from user_patch_memory_harness import with_memory_helpers
 import re
 import subprocess
 import sys
@@ -23,6 +24,7 @@ def main():
     if '--baseline' in sys.argv:
         source = subprocess.check_output(['git','show','6c7b0804b5b115052fab5914eecfad7090b53eb1:NootedRed/UserVideoDecode.cpp'],cwd=ROOT,text=True)
     body = re.split(r'namespace\s*\{', source, maxsplit=1)[1].split('}    // namespace', 1)[0]
+    body = with_memory_helpers(body)
     template = (ROOT / 'tools/fixtures/vcn-user-bridge.cpp.in').read_text()
     preamble = template[:template.index('static bool isWindowServer')]
     preamble = preamble.replace('#include "UserVideoDecodeData.hpp"', '#include <vector>\n#include "UserVideoDecodeData.hpp"\n#include "UserVideoDecodeResolver.hpp"')

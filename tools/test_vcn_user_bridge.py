@@ -1,5 +1,6 @@
 """编译实际视频 COW 桥接代码，验证每个写入/保护失败、混合版本拒绝和返回值。"""
 from pathlib import Path
+from user_patch_memory_harness import with_memory_helpers
 import re
 import subprocess
 
@@ -24,6 +25,7 @@ def main():
     closing = re.search(r"\}\s*// namespace", source)
     assert namespace is not None and closing is not None
     body = source[namespace.end():closing.start()]
+    body = with_memory_helpers(body)
     init = source[source.index("void UserVideoDecode::init("):]
     template = (ROOT / "tools/fixtures/vcn-user-bridge.cpp.in").read_text()
     harness = WORK / "test-user-bridge.cpp"

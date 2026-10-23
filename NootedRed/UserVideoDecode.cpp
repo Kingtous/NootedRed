@@ -4,6 +4,7 @@
 #include <NRed.hpp>
 #include <PenguinWizardry/KernelVersion.hpp>
 #include <UserLegacyData.hpp>
+#include <UserPatchMemory.hpp>
 #include <UserPatchPolicy.hpp>
 #include <UserVideoDecode.hpp>
 #include <UserVideoDecodeData.hpp>
@@ -26,8 +27,7 @@ namespace
     static_assert(sizeof(SharedRegionCheckArgs) == 8);
     using SharedRegionCheck = int       (*)(proc_t, SharedRegionCheckArgs*, int*);
     using GetTaskMap        = vm_map_t         (*)(task_t);
-    using RegionRecurse     = kern_return_t (*)(vm_map_t, mach_vm_address_t*, mach_vm_size_t*, natural_t*,
-                                            vm_region_recurse_info_t, mach_msg_type_number_t*);
+    using RegionRecurse     = UserPatchMemory::RegionQuery;
     using CopyIn            = int                  (*)(user_addr_t, void*, size_t);
     using CopyOut           = int                 (*)(const void*, user_addr_t, size_t);
 
@@ -95,64 +95,16 @@ namespace
         }
     }
 
+    using UserPatchMemory::Page;
+
     bool leafProtection(vm_map_t map, const mach_vm_address_t page, vm_prot_t& protection)
     {
-        natural_t depth{0};
-        for (UInt32 attempt = 0; attempt < 8; ++attempt) {
-            auto           address = page;
-            mach_vm_size_t size{0};
-            // 只查询映射与权限，避免完整查询逐页统计整个共享缓存区域。
-            vm_region_submap_short_info_data_64_t info{};
-            mach_msg_type_number_t                count = VM_REGION_SUBMAP_SHORT_INFO_COUNT_64;
-            const auto                            result =
-                queryRegion(map, &address, &size, &depth, reinterpret_cast<vm_region_recurse_info_t>(&info), &count);
-            if (result != KERN_SUCCESS) {
-                error(result);
-                return false;
-            }
-            if (count < VM_REGION_SUBMAP_SHORT_INFO_COUNT_64 || address > page || page - address >= size
-                || size - (page - address) < PAGE_SIZE)
-            {
-                return false;
-            }
-            if (!info.is_submap) {
-                protection = info.protection;
-                return true;
-            }
-            if (depth == ~0U) { break; }
-            ++depth;
-        }
-        return false;
+        return UserPatchMemory::leafProtection(map, page, protection, queryRegion, error);
     }
-
-    struct Page
-    {
-        mach_vm_address_t address{0};
-        vm_prot_t         protection{VM_PROT_NONE};
-        bool              writable{false};
-    };
 
     bool restorePages(vm_map_t map, Page* pages, const UInt32 count)
     {
-        bool restored = true;
-        for (UInt32 i = 0; i < count; ++i) {
-            if (!pages[i].writable) { continue; }
-            // 先恢复当前权限，再下调最大权限；set_maximum 会取当前权限与新最大权限的交集。
-            auto result = vm_protect(map, pages[i].address, PAGE_SIZE, FALSE, pages[i].protection);
-            if (result != KERN_SUCCESS) {
-                error(result);
-                result = vm_protect(map, pages[i].address, PAGE_SIZE, FALSE, pages[i].protection);
-            }
-            if (result == KERN_SUCCESS) {
-                const auto maximum = vm_protect(map, pages[i].address, PAGE_SIZE, TRUE, pages[i].protection);
-                if (maximum != KERN_SUCCESS) { error(maximum); }
-                pages[i].writable = false;
-            }
-            else {
-                restored = false;
-            }
-        }
-        return restored;
+        return UserPatchMemory::restorePages(map, pages, count, error);
     }
 
     struct SavedRow
@@ -176,32 +128,7 @@ namespace
         bool ok = true;
         for (UInt32 i = 0; i < touched; ++i) {
             const auto address = base + patches[i].offset;
-            const auto first   = address & ~static_cast<UInt64>(PAGE_SIZE - 1);
-            const auto last    = (address + patches[i].size - 1) & ~static_cast<UInt64>(PAGE_SIZE - 1);
-            bool       ready   = true;
-            for (auto pageAddress = first; pageAddress <= last; pageAddress += PAGE_SIZE) {
-                Page* page = nullptr;
-                for (UInt32 p = 0; p < pageCount; ++p) {
-                    if (pages[p].address == pageAddress) {
-                        page = &pages[p];
-                        break;
-                    }
-                }
-                if (!page) {
-                    ready = false;
-                    continue;
-                }
-                if (!page->writable) {
-                    const auto result =
-                        vm_protect(map, pageAddress, PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
-                    if (result != KERN_SUCCESS) {
-                        error(result);
-                        ready = false;
-                        continue;
-                    }
-                    page->writable = true;
-                }
-            }
+            const bool ready = UserPatchMemory::prepareRollback(map, pages, pageCount, address, patches[i].size, error);
             if (!ready) {
                 ok = false;
                 continue;
@@ -363,7 +290,6 @@ namespace
         UInt32 pageCount{0}, originals{0}, patched{0};
         for (UInt32 i = 0; i < patchCount; ++i) {
             const auto address = base + patches[i].offset;
-            const auto page    = address & ~static_cast<UInt64>(PAGE_SIZE - 1);
             if (patches[i].size == 0 || patches[i].size > MaxPatchSize
                 || patches[i].offset >= UserSharedCache::UserLimit - base
                 || patches[i].size >= UserSharedCache::UserLimit - base - patches[i].offset
@@ -381,22 +307,9 @@ namespace
                 error(KERN_INVALID_ARGUMENT);
                 return result;
             }
-            const auto last = (address + patches[i].size - 1) & ~static_cast<UInt64>(PAGE_SIZE - 1);
-            for (auto pageAddress = page; pageAddress <= last; pageAddress += PAGE_SIZE) {
-                bool found = false;
-                for (UInt32 p = 0; p < pageCount; ++p) {
-                    if (pages[p].address == pageAddress) {
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found) {
-                    if (pageCount == MaxPageCount) {
-                        stage(Stage::CodeMismatch, fairPlayPID);
-                        return result;
-                    }
-                    pages[pageCount++].address = pageAddress;
-                }
+            if (!UserPatchMemory::collectPages(pages, pageCount, address, patches[i].size)) {
+                stage(Stage::CodeMismatch, fairPlayPID);
+                return result;
             }
         }
         if (patched == patchCount) {

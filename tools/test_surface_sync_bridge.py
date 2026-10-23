@@ -1,5 +1,6 @@
 """编译实际内核桥接代码，覆盖多页拒绝、部分写入回滚和保护恢复。"""
 from pathlib import Path
+from user_patch_memory_harness import with_memory_helpers
 import re
 import subprocess
 
@@ -15,6 +16,7 @@ def main():
     header = (ROOT / "NootedRed/UserSurfaceSyncData.hpp").read_text().split("DevicePatches[] = {", 1)[1].split("};", 1)[0]
     assert devices == {int(value, 16) for value in re.findall(r"\{(0x[0-9A-Fa-f]+),", header)}, 'PCI 表与原作者分类不同步'
     body = source[source.index("namespace {") + len("namespace {"):source.index("} // namespace")]
+    body = with_memory_helpers(body)
     init = source[source.index("void UserSurfaceSync::init("):]
     stub = WORK / "stubs/IOKit"
     stub.mkdir(parents=True, exist_ok=True)

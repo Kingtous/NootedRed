@@ -27,6 +27,31 @@ namespace UserLegacyCompat
         UInt32       patchCount;
     };
 
+    inline bool matchesPatchedByte(UInt8 value, UInt64 position, const Profile& profile)
+    {
+        for (UInt32 i = 0; i < profile.patchCount; ++i) {
+            const auto& patch = profile.patches[i];
+            if (position >= patch.offset && position - patch.offset < patch.size
+                && value == patch.patched[position - patch.offset])
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    inline bool matchesChunk(const UInt8* bytes, const Page& page, UInt32 offset, UInt32 size, const Profile& profile)
+    {
+        const auto* original = page.original + offset;
+        if (memcmp(bytes, original, size) == 0) { return true; }
+        for (UInt32 i = 0; i < size; ++i) {
+            if (bytes[i] != original[i] && !matchesPatchedByte(bytes[i], page.offset + offset + i, profile)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     inline bool matches(UserSharedCache::Reader reader, UInt64 base, const UInt8* uuid, const Profile& profile)
     {
         if (!reader || !uuid || memcmp(uuid, profile.uuid, 16) != 0 || profile.pageCount == 0 || profile.pageCount > 16
@@ -44,22 +69,10 @@ namespace UserLegacyCompat
                 return false;
             }
             for (UInt32 offset = 0; offset < 4096; offset += sizeof(bytes)) {
-                if (reader(base + page.offset + offset, bytes, sizeof(bytes)) != 0) { return false; }
-                for (UInt32 j = 0; j < sizeof(bytes); ++j) {
-                    const auto position = page.offset + offset + j;
-                    auto       expected = page.original[offset + j];
-                    if (bytes[j] == expected) { continue; }
-                    bool accepted = false;
-                    for (UInt32 k = 0; k < profile.patchCount; ++k) {
-                        const auto& patch = profile.patches[k];
-                        if (position >= patch.offset && position - patch.offset < patch.size
-                            && bytes[j] == patch.patched[position - patch.offset])
-                        {
-                            accepted = true;
-                            break;
-                        }
-                    }
-                    if (!accepted) { return false; }
+                if (reader(base + page.offset + offset, bytes, sizeof(bytes)) != 0
+                    || !matchesChunk(bytes, page, offset, sizeof(bytes), profile))
+                {
+                    return false;
                 }
             }
         }
