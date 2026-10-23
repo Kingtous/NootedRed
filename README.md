@@ -18,6 +18,10 @@
 
 The macOS kernel extension for GPU bug fixes, QoL improvements, and extended hardware support.
 
+Research branch: [shared-region hook stack investigation and workflow usage](docs/shared-region-stack-research.md).
+This candidate addresses suspected stack pressure when display and video fixes are enabled together;
+real-device acceptance is pending.
+
 “NootedRed” is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose and noninfringement.
 
 By using this software, you acknowledge that you are solely responsible for how you use it. The “NootedRed” project team is not responsible for any damage, legal issues, data loss, or other consequences arising from its use.

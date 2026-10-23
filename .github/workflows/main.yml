@@ -3,7 +3,7 @@ name: CI
 on:
   push:
     branches:
-      - "*"
+      - "**"
     tags:
       - "v*"
   pull_request:
@@ -12,56 +12,34 @@ on:
 jobs:
   build:
     name: Build
-    runs-on: macos-latest
+    runs-on: macos-15-intel
     permissions:
       contents: write
       discussions: write
+    timeout-minutes: 45
     steps:
-      - if: github.repository != 'ChefKissInc/NootedRed'
-        run: |
-          cat << 'EOF' >> $GITHUB_STEP_SUMMARY
-          # 🛑 STOP!
-
-          ## You were likely sent here by an unofficial, outdated and SHIT tutorial
-
-          This project is actually the result of one sole developer, [Visual](https://github.com/VisualEhrmanntraut) (me).
-
-          **WE DO NOT RECOMMEND, ENDORSE, OR WORK WITH THEM!** They contain incorrect information, drive users away from official documentation, and hurt this project by preventing us from receiving support through donations.
-
-          You **do not** need to fork this repository or log into GitHub to download this!
-
-          👉 Please use the official links (linked below, continue reading).
-          Also spread the word if you want! :)
-
-          ### ❤️ Support our Hard Work by Donating
-
-          *   **Using PayPal or credit/debit card:** [through ko-fi](https://ko-fi.com/chefkiss)
-          *   **Using BTC:** `bc1qgu56kptepex2csuzl5nhzc4vxuj8c6ggjzhcem`
-          *   **Using SOL:** `4PJU3iB5rimN9BNcpzduvmTnptJyedZiAd23so33SAdi`
-          *   **Using ETH:** `0x038A25849c23Bc5A736484351a8B6Ad71bC46676`
-
-          With enough support, I could even give back to the volunteers (if they wish).
-
-          ### 🔬 Official Resources
-
-          *   🚀 **Bleeding-Edge / Nightly Builds (No login required!) + Usage information**: [Click here](https://chefkiss.dev/applehax/nootedred/)
-          *   📚 **Official ChefKiss Guide**: [Click here](https://chefkiss.dev/guides/hackintosh/)
-          *   ⬇️ **Official Stable Releases**: [Click here](https://github.com/ChefKissInc/NootedRed/releases)
-          *   💬 **Telegram supergroup**: Link located in the navigation bar of the [official website](https://chefkiss.dev) (not linked directly to prevent scraper-powered bots)
-
-          **Bonus:** Me and [my colleague](https://github.com/chris-pcguy) have created a cross-platform (Windows, Linux, macOS) iOS emulator called Inferno, and this year it will also support macOS! [Click here](https://chefkiss.dev/applehax/inferno/)
-
-          Happy Hackintoshing!
-          EOF
-          exit 1
       - uses: actions/checkout@v7
         with:
           submodules: "recursive"
+      - name: Record research build provenance
+        run: |
+          mkdir -p build/diagnostics
+          git rev-parse HEAD > build/diagnostics/commit.txt
+          git submodule status > build/diagnostics/submodules.txt
+          xcodebuild -version > build/diagnostics/xcode.txt
+          echo "Unofficial research build; dual-feature hardware acceptance pending." >> "$GITHUB_STEP_SUMMARY"
+      - name: Test shared-region hooks and patch rollback
+        run: |
+          python3 tools/test_shared_region_hooks.py
+          python3 tools/test_surface_sync_bridge.py
+          python3 tools/test_vcn_user_bridge.py
+          python3 tools/test_legacy_bridges.py --sanitize
+          python3 tools/test_fix_package.py
       - name: Test EC backlight service
         run: |
           python3 tools/test_ec_backlight_service.py
           python3 tools/test_ec_backlight_service.py --thread-sanitizer
-      - run: xcodebuild -configuration Debug -arch x86_64 build
+      - run: xcodebuild -configuration Debug -arch x86_64 DEBUG_INFORMATION_FORMAT=dwarf-with-dsym build
       - run: xcodebuild -configuration Research\ Release -arch x86_64 build
       - run: xcodebuild -configuration Release -arch x86_64 build
       - name: Check IOKit class symbols
@@ -69,11 +47,23 @@ jobs:
           python3 tools/test_ec_backlight_binary.py build/Debug/NootedRed.kext
           python3 tools/test_ec_backlight_binary.py 'build/Research Release/NootedRed.kext'
           python3 tools/test_ec_backlight_binary.py build/Release/NootedRed.kext
+          python3 tools/test_fix_package.py build/Debug/NootedRed.kext 'build/Research Release/NootedRed.kext' build/Release/NootedRed.kext
+      - name: Record shared-region symbols
+        run: |
+          for config in Debug 'Research Release' Release; do
+            xcrun dwarfdump --uuid "build/$config/NootedRed.kext" > "build/diagnostics/$config-uuid.txt"
+            xcrun dwarfdump --name=wrappedSharedRegionCheck "build/$config/NootedRed.kext.dSYM" > "build/diagnostics/$config-wrappers.txt"
+          done
       - name: Upload to Artifacts
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: Artifacts
-          path: build/*/*.zip
+          name: NootedRed-research-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            build/*/*.zip
+            build/*/*.kext.dSYM/**
+            build/diagnostics/**
       - name: Upload build
         if: startsWith(github.ref, 'refs/tags/')
         run: |
@@ -102,9 +92,10 @@ jobs:
 
   analyse-clang:
     name: Analyse Clang
-    runs-on: macos-latest
+    runs-on: macos-15-intel
     permissions:
       contents: read
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         with:

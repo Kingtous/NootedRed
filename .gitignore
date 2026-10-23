@@ -37,4 +37,6 @@ build/
 !*.xcworkspace/contents.xcworkspacedata
 **/xcshareddata/WorkspaceSettings.xcsettings
 .cache/
+__pycache__/
+*.pyc
 clang_analyze/
