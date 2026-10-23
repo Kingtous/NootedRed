@@ -14,7 +14,9 @@
 | SubmitGuard | 14.8.9 / 23J631 的缓存配置 | 15.8.1 / 24H32 的缓存配置 | 原有参考缓存配置 |
 | `-NRedDisplayFix` 中的 LegacyBlend | 完整页面核验后的条件修复 | 完整页面核验后的条件修复 | 保留原有静态／动态匹配 |
 | `-NRedVideoFix` | 独立 ABI 与调用点；精确视频页面 | 独立 ABI 与调用点；精确视频页面 | 保留原有 ABI 与动态解析 |
-| ImmediateSync / SrdShared / ComputeScratch | 尚未适配 | 尚未适配 | 保留原有行为 |
+| ImmediateSync | 关闭 | 关闭 | 关闭 |
+| SrdShared / ComputeScratch | 尚未适配 | 尚未适配 | 启用 |
+| FairPlay 客户端 | 13 项 AMD 解码子集及 PSP 工厂适配 | 13 项 AMD 解码子集及 PSP 工厂适配 | 18 项 AMD 解码子集及 PSP 工厂适配 |
 
 14.8.9 的缓存 UUID 为 `4C1441FD-8A54-3DC2-863D-49110B946A25`，
 15.8.1 为 `42EC2890-BC40-317E-BB27-45142BFF7F26`。
@@ -22,7 +24,8 @@
 14/15 的未知 UUID、完整页面不符、内核 getter／调用点不符均拒绝；不套用 Tahoe 的偏移或函数实现。
 
 SubmitGuard 随 `-NRedDisplayFix` 启用，移除显示参数即关闭整组修复。
-14/15 不执行 Tahoe 的 ImmediateSync、SrdShared、Scratch；本版不含 HDR 候选。
+14/15 不执行 Tahoe 的 SrdShared、Scratch；26 保留原生同步策略，移除 ImmediateSync。
+本版不含 HDR 候选。
 VCN 仍仅接入 `15E7 / 1636 / 1638 / 164C` 的 VCN 2.2，Raven/Picasso 的 VCN1 继续拒绝。
 
 ## 核实并采用的优化
@@ -41,7 +44,9 @@ VCN 仍仅接入 `15E7 / 1636 / 1638 / 164C` 的 VCN 2.2，Raven/Picasso 的 VCN
   安装失败释放尚未引用的页；入口无法确认恢复时保留目标页并报告
   `NRedSubmitGuardRollbackFailed`，避免残留跳转引用已释放内存。
   守卫页恢复当前和最大 RX 权限，`NRedSubmitGuardRevision=6` 标记此实现。
-- 保留现有计算提交虚表地址点修复、FairPlay 视频客户端跳过策略、已用命令内容和同批流保护。
+- 保留现有计算提交虚表地址点修复、已用命令内容和同批流保护。
+  FairPlay 客户端在三个系统上统一采用 AMD 解码子集，排除 AppleGVA 和编码代码；
+  旧系统新增的 PSP 工厂比较位同样受完整页面核验保护。
 
 旧系统视频事务核验九个完整页面，实际只修改生成计划内的范围。
 生成数据不含旧系统未提供证据的 pitch 和 swizzle 消费者补丁；这些优化继续仅用于

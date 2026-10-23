@@ -7,6 +7,7 @@ import re
 
 from build_video_decode_patch import identify_payload
 from vcn_capabilities import devices
+from legacy_cp_factory import factory
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / 'tools/fixtures/legacy-compat.json'
@@ -139,6 +140,11 @@ def generate():
                     new = bytes.fromhex('be02000000eb') + bytes([target - 7]) + b'\x90'
                 originals.append((address, old))
                 replacements.append(new)
+        cp_address, _, _, cp_offset = factory(profile)
+        assert read(cp_address + cp_offset, 1) == b'\x04'
+        originals.append((cp_address + cp_offset, b'\x04'))
+        replacements.append(b'\x05')
+        fairplay_mask = (1 << len(originals)) - 1
         gva = profile['gva']
         originals.append((gva['address'], bytes.fromhex(gva['find'])))
         replacements.append(bytes.fromhex(gva['replace']))
@@ -156,7 +162,7 @@ def generate():
                 header += f'    {{0x{address - 0x7FF800000000:X}ULL, {prefix}Original{i}, {patched}, {len(old)}}},\n'
             header += '};\n'
             header += (f'inline constexpr UserLegacyCompat::Profile {variant} = {{{major}, {prefix}UUID, {prefix}Pages, '
-                       f'9, {variant}Patches, {len(originals)}}};\n')
+                       f'9, {variant}Patches, {len(originals)}, 0x{fairplay_mask:X}U}};\n')
         metal = profile['metal']
         page = bytes.fromhex(metal['page'])
         gate = metal['gate'] & 4095

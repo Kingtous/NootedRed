@@ -2455,9 +2455,15 @@ inline constexpr UInt8 OS23Patched11[] = {
     0x8F, 0x18, 0x5B, 0x00, 0x00, 0x0D, 0xB8, 0x08, 0x00, 0x00, 0x00, 0xC3, 0x90, 0x90, 0x90, 0x90,
 };
 inline constexpr UInt8 OS23Original12[] = {
-    0x0F, 0x84, 0x99, 0x00, 0x00, 0x00,
+    0x04,
 };
 inline constexpr UInt8 OS23Patched12[] = {
+    0x05,
+};
+inline constexpr UInt8 OS23Original13[] = {
+    0x0F, 0x84, 0x99, 0x00, 0x00, 0x00,
+};
+inline constexpr UInt8 OS23Patched13[] = {
     0x0F, 0x84, 0x70, 0x00, 0x00, 0x00,
 };
 inline constexpr UInt8 OS23D15E7Identify[] = {
@@ -2503,9 +2509,10 @@ inline constexpr UserLegacyCompat::Patch OS23D15E7Patches[] = {
     {0x3033E827CULL, OS23Original9, OS23Patched9, 7},
     {0x3033FFC15ULL, OS23Original10, OS23Patched10, 7},
     {0x3034154F0ULL, OS23Original11, OS23Patched11, 160},
-    {0x2002A2D3CULL, OS23Original12, OS23Patched12, 6},
+    {0x3033A69FAULL, OS23Original12, OS23Patched12, 1},
+    {0x2002A2D3CULL, OS23Original13, OS23Patched13, 6},
 };
-inline constexpr UserLegacyCompat::Profile OS23D15E7 = {23, OS23UUID, OS23Pages, 9, OS23D15E7Patches, 13};
+inline constexpr UserLegacyCompat::Profile OS23D15E7 = {23, OS23UUID, OS23Pages, 9, OS23D15E7Patches, 14, 0x1FFFU};
 inline constexpr UInt8 OS23D1636Identify[] = {
     0x55, 0x48, 0x89, 0xE5, 0x53, 0x48, 0x83, 0xEC, 0x28, 0x48, 0xC7, 0x45, 0xF0, 0x18, 0x01, 0x00,
     0x00, 0x6A, 0x0B, 0x5B, 0x83, 0xFE, 0x01, 0x75, 0x36, 0x48, 0x8D, 0x45, 0xF0, 0x48, 0x89, 0x44,
@@ -2549,9 +2556,10 @@ inline constexpr UserLegacyCompat::Patch OS23D1636Patches[] = {
     {0x3033E827CULL, OS23Original9, OS23Patched9, 7},
     {0x3033FFC15ULL, OS23Original10, OS23Patched10, 7},
     {0x3034154F0ULL, OS23Original11, OS23Patched11, 160},
-    {0x2002A2D3CULL, OS23Original12, OS23Patched12, 6},
+    {0x3033A69FAULL, OS23Original12, OS23Patched12, 1},
+    {0x2002A2D3CULL, OS23Original13, OS23Patched13, 6},
 };
-inline constexpr UserLegacyCompat::Profile OS23D1636 = {23, OS23UUID, OS23Pages, 9, OS23D1636Patches, 13};
+inline constexpr UserLegacyCompat::Profile OS23D1636 = {23, OS23UUID, OS23Pages, 9, OS23D1636Patches, 14, 0x1FFFU};
 inline constexpr UInt8 OS23D1638Identify[] = {
     0x55, 0x48, 0x89, 0xE5, 0x53, 0x48, 0x83, 0xEC, 0x28, 0x48, 0xC7, 0x45, 0xF0, 0x18, 0x01, 0x00,
     0x00, 0x6A, 0x0B, 0x5B, 0x83, 0xFE, 0x01, 0x75, 0x36, 0x48, 0x8D, 0x45, 0xF0, 0x48, 0x89, 0x44,
@@ -2595,9 +2603,10 @@ inline constexpr UserLegacyCompat::Patch OS23D1638Patches[] = {
     {0x3033E827CULL, OS23Original9, OS23Patched9, 7},
     {0x3033FFC15ULL, OS23Original10, OS23Patched10, 7},
     {0x3034154F0ULL, OS23Original11, OS23Patched11, 160},
-    {0x2002A2D3CULL, OS23Original12, OS23Patched12, 6},
+    {0x3033A69FAULL, OS23Original12, OS23Patched12, 1},
+    {0x2002A2D3CULL, OS23Original13, OS23Patched13, 6},
 };
-inline constexpr UserLegacyCompat::Profile OS23D1638 = {23, OS23UUID, OS23Pages, 9, OS23D1638Patches, 13};
+inline constexpr UserLegacyCompat::Profile OS23D1638 = {23, OS23UUID, OS23Pages, 9, OS23D1638Patches, 14, 0x1FFFU};
 inline constexpr UInt8 OS23D164CIdentify[] = {
     0x55, 0x48, 0x89, 0xE5, 0x53, 0x48, 0x83, 0xEC, 0x28, 0x48, 0xC7, 0x45, 0xF0, 0x18, 0x01, 0x00,
     0x00, 0x6A, 0x0B, 0x5B, 0x83, 0xFE, 0x01, 0x75, 0x36, 0x48, 0x8D, 0x45, 0xF0, 0x48, 0x89, 0x44,
@@ -2641,9 +2650,10 @@ inline constexpr UserLegacyCompat::Patch OS23D164CPatches[] = {
     {0x3033E827CULL, OS23Original9, OS23Patched9, 7},
     {0x3033FFC15ULL, OS23Original10, OS23Patched10, 7},
     {0x3034154F0ULL, OS23Original11, OS23Patched11, 160},
-    {0x2002A2D3CULL, OS23Original12, OS23Patched12, 6},
+    {0x3033A69FAULL, OS23Original12, OS23Patched12, 1},
+    {0x2002A2D3CULL, OS23Original13, OS23Patched13, 6},
 };
-inline constexpr UserLegacyCompat::Profile OS23D164C = {23, OS23UUID, OS23Pages, 9, OS23D164CPatches, 13};
+inline constexpr UserLegacyCompat::Profile OS23D164C = {23, OS23UUID, OS23Pages, 9, OS23D164CPatches, 14, 0x1FFFU};
 inline constexpr UInt8 OS23MetalPage[] = {
     0x00, 0x00, 0x48, 0x8B, 0x8D, 0x88, 0xFE, 0xFF, 0xFF, 0x42, 0x8B, 0x84, 0xB9, 0x04, 0x01, 0x00,
     0x00, 0xBA, 0xFF, 0xF8, 0xFF, 0xF8, 0x21, 0xD0, 0x0D, 0x00, 0x06, 0x00, 0x06, 0x42, 0x89, 0x84,
@@ -5364,9 +5374,15 @@ inline constexpr UInt8 OS24Patched11[] = {
     0x8F, 0x18, 0x5B, 0x00, 0x00, 0x0D, 0xB8, 0x08, 0x00, 0x00, 0x00, 0xC3, 0x90, 0x90, 0x90, 0x90,
 };
 inline constexpr UInt8 OS24Original12[] = {
-    0x0F, 0x84, 0xD6, 0x03, 0x00, 0x00,
+    0x04,
 };
 inline constexpr UInt8 OS24Patched12[] = {
+    0x05,
+};
+inline constexpr UInt8 OS24Original13[] = {
+    0x0F, 0x84, 0xD6, 0x03, 0x00, 0x00,
+};
+inline constexpr UInt8 OS24Patched13[] = {
     0x0F, 0x84, 0x2A, 0x00, 0x00, 0x00,
 };
 inline constexpr UInt8 OS24D15E7Identify[] = {
@@ -5412,9 +5428,10 @@ inline constexpr UserLegacyCompat::Patch OS24D15E7Patches[] = {
     {0x30865082CULL, OS24Original9, OS24Patched9, 7},
     {0x308667C65ULL, OS24Original10, OS24Patched10, 7},
     {0x30867D770ULL, OS24Original11, OS24Patched11, 160},
-    {0x20669241BULL, OS24Original12, OS24Patched12, 6},
+    {0x30860FEC7ULL, OS24Original12, OS24Patched12, 1},
+    {0x20669241BULL, OS24Original13, OS24Patched13, 6},
 };
-inline constexpr UserLegacyCompat::Profile OS24D15E7 = {24, OS24UUID, OS24Pages, 9, OS24D15E7Patches, 13};
+inline constexpr UserLegacyCompat::Profile OS24D15E7 = {24, OS24UUID, OS24Pages, 9, OS24D15E7Patches, 14, 0x1FFFU};
 inline constexpr UInt8 OS24D1636Identify[] = {
     0x55, 0x48, 0x89, 0xE5, 0x53, 0x48, 0x83, 0xEC, 0x28, 0x48, 0xC7, 0x45, 0xF0, 0x18, 0x01, 0x00,
     0x00, 0x6A, 0x0B, 0x5B, 0x83, 0xFE, 0x01, 0x75, 0x36, 0x48, 0x8D, 0x45, 0xF0, 0x48, 0x89, 0x44,
@@ -5458,9 +5475,10 @@ inline constexpr UserLegacyCompat::Patch OS24D1636Patches[] = {
     {0x30865082CULL, OS24Original9, OS24Patched9, 7},
     {0x308667C65ULL, OS24Original10, OS24Patched10, 7},
     {0x30867D770ULL, OS24Original11, OS24Patched11, 160},
-    {0x20669241BULL, OS24Original12, OS24Patched12, 6},
+    {0x30860FEC7ULL, OS24Original12, OS24Patched12, 1},
+    {0x20669241BULL, OS24Original13, OS24Patched13, 6},
 };
-inline constexpr UserLegacyCompat::Profile OS24D1636 = {24, OS24UUID, OS24Pages, 9, OS24D1636Patches, 13};
+inline constexpr UserLegacyCompat::Profile OS24D1636 = {24, OS24UUID, OS24Pages, 9, OS24D1636Patches, 14, 0x1FFFU};
 inline constexpr UInt8 OS24D1638Identify[] = {
     0x55, 0x48, 0x89, 0xE5, 0x53, 0x48, 0x83, 0xEC, 0x28, 0x48, 0xC7, 0x45, 0xF0, 0x18, 0x01, 0x00,
     0x00, 0x6A, 0x0B, 0x5B, 0x83, 0xFE, 0x01, 0x75, 0x36, 0x48, 0x8D, 0x45, 0xF0, 0x48, 0x89, 0x44,
@@ -5504,9 +5522,10 @@ inline constexpr UserLegacyCompat::Patch OS24D1638Patches[] = {
     {0x30865082CULL, OS24Original9, OS24Patched9, 7},
     {0x308667C65ULL, OS24Original10, OS24Patched10, 7},
     {0x30867D770ULL, OS24Original11, OS24Patched11, 160},
-    {0x20669241BULL, OS24Original12, OS24Patched12, 6},
+    {0x30860FEC7ULL, OS24Original12, OS24Patched12, 1},
+    {0x20669241BULL, OS24Original13, OS24Patched13, 6},
 };
-inline constexpr UserLegacyCompat::Profile OS24D1638 = {24, OS24UUID, OS24Pages, 9, OS24D1638Patches, 13};
+inline constexpr UserLegacyCompat::Profile OS24D1638 = {24, OS24UUID, OS24Pages, 9, OS24D1638Patches, 14, 0x1FFFU};
 inline constexpr UInt8 OS24D164CIdentify[] = {
     0x55, 0x48, 0x89, 0xE5, 0x53, 0x48, 0x83, 0xEC, 0x28, 0x48, 0xC7, 0x45, 0xF0, 0x18, 0x01, 0x00,
     0x00, 0x6A, 0x0B, 0x5B, 0x83, 0xFE, 0x01, 0x75, 0x36, 0x48, 0x8D, 0x45, 0xF0, 0x48, 0x89, 0x44,
@@ -5550,9 +5569,10 @@ inline constexpr UserLegacyCompat::Patch OS24D164CPatches[] = {
     {0x30865082CULL, OS24Original9, OS24Patched9, 7},
     {0x308667C65ULL, OS24Original10, OS24Patched10, 7},
     {0x30867D770ULL, OS24Original11, OS24Patched11, 160},
-    {0x20669241BULL, OS24Original12, OS24Patched12, 6},
+    {0x30860FEC7ULL, OS24Original12, OS24Patched12, 1},
+    {0x20669241BULL, OS24Original13, OS24Patched13, 6},
 };
-inline constexpr UserLegacyCompat::Profile OS24D164C = {24, OS24UUID, OS24Pages, 9, OS24D164CPatches, 13};
+inline constexpr UserLegacyCompat::Profile OS24D164C = {24, OS24UUID, OS24Pages, 9, OS24D164CPatches, 14, 0x1FFFU};
 inline constexpr UInt8 OS24MetalPage[] = {
     0x33, 0x00, 0x8B, 0x3C, 0xB1, 0x83, 0xE7, 0x07, 0x89, 0xD1, 0x83, 0xE1, 0xF8, 0x09, 0xF9, 0x43,
     0x89, 0x8C, 0xB8, 0x04, 0x01, 0x00, 0x00, 0x8D, 0x7E, 0xFA, 0x83, 0xFF, 0x04, 0x77, 0x05, 0x83,

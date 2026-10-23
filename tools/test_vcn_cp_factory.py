@@ -9,6 +9,7 @@ import subprocess
 from audit_video_driver import symbols
 from metal_cache import CACHE, CacheReader
 from test_video_driver_identify import byte_lines
+from legacy_cp_factory import factory
 
 ROOT = Path(__file__).resolve().parents[1]
 WORK = ROOT / 'build/vcn-cp-factory'
@@ -64,6 +65,22 @@ def main():
         assembly += '.globl _nativeGetKE\n_nativeGetKE:\n' + byte_lines(dispatch) + '\n'
     finally:
         cache.close()
+    profiles = json.loads((ROOT / 'tools/fixtures/legacy-compat.json').read_text())['profiles']
+    for profile in profiles:
+        major = profile['major']
+        _, original, patched, offset = factory(profile)
+        assert [i for i, (a, b) in enumerate(zip(original, patched)) if a != b] == [offset]
+        calls = [0x40, 0x4B, 0x5B, 0x66, 0xA9, 0xB1] if major == 23 else [0x49, 0x54, 0x64, 0x6F, 0xAA, 0xB2]
+        replacements = list(zip(calls, ['allocate', 'psp', 'allocate', 'samu', 'deallocate', 'rethrow']))
+        for label, code in [(f'stockFactory{major}', original),
+                            (f'candidateFactory{major}', original if args.baseline else patched)]:
+            assembly += f'.globl _{label}\n_{label}:\n'
+            cursor = 0
+            for offset, name in replacements:
+                assert code[offset] == 0xE8
+                assembly += byte_lines(code[cursor:offset]) + f'\ncallq _{name}\n'
+                cursor = offset + 5
+            assembly += byte_lines(code[cursor:]) + '\n'
     source = r'''
 #include <array>
 #include <cassert>
@@ -76,6 +93,10 @@ static unsigned selected,allocations,initializations,destructions;
 static int initStatus;
 extern "C" int stockFactory(void*,void*,void*,void**);
 extern "C" int candidateFactory(void*,void*,void*,void**);
+extern "C" int stockFactory23(void*,void*,void*,void**);
+extern "C" int candidateFactory23(void*,void*,void*,void**);
+extern "C" int stockFactory24(void*,void*,void*,void**);
+extern "C" int candidateFactory24(void*,void*,void*,void**);
 extern "C" int nativeGetKE(void*,unsigned,void*);
 using Factory=int(*)(void*,void*,void*,void**);
 static int init(void* p,void* connection){assert(p==object.data()&&connection==reinterpret_cast<void*>(0x1234));initializations++;return initStatus;}
@@ -91,11 +112,14 @@ static int exchangeResult;static unsigned exchanges;static void* exchangeInput;
 static int exchange(void* p,unsigned tag,void* bytes){assert(p==object.data()&&tag==8&&bytes==exchangeInput);exchanges++;return exchangeResult;}
 int main(){
  std::array<uint8_t,16> config{};
- for(auto function:{stockFactory,candidateFactory})for(unsigned type=0;type<65536;type++){
+ for(auto pair:{std::array<Factory,2>{stockFactory,candidateFactory},
+                std::array<Factory,2>{stockFactory23,candidateFactory23},
+                std::array<Factory,2>{stockFactory24,candidateFactory24}})
+ for(auto function:pair)for(unsigned type=0;type<65536;type++){
   memcpy(config.data()+12,&type,4);selected=allocations=initializations=destructions=0;initStatus=0;void* output=reinterpret_cast<void*>(0x5678);
   unsigned expected=type==0?1:type<=4?2:0;
 #ifndef BASELINE
-  if(function==candidateFactory&&type==5)expected=2;
+  if(function==pair[1]&&type==5)expected=2;
 #endif
   assert(function(nullptr,config.data(),reinterpret_cast<void*>(0x1234),&output)==0);
   assert(selected==expected&&output==(expected?object.data():nullptr));
@@ -106,7 +130,7 @@ int main(){
    assert(output==nullptr&&destructions==1);
   }
  }
- for(auto function:{stockFactory,candidateFactory}){
+ for(auto function:{stockFactory,candidateFactory,stockFactory23,candidateFactory23,stockFactory24,candidateFactory24}){
   void* output=reinterpret_cast<void*>(0x5678);
   assert(function(nullptr,nullptr,reinterpret_cast<void*>(0x1234),&output)==5&&output==reinterpret_cast<void*>(0x5678));
   assert(function(nullptr,config.data(),nullptr,&output)==5&&output==reinterpret_cast<void*>(0x5678));
@@ -126,7 +150,7 @@ int main(){
 #ifdef BASELINE
  puts("PASS baseline: native CP factory returns success with null for enum 5; KE requires a real CP object");
 #else
- puts("PASS: 65536 CP families; only enum 5 adds native PSP; bad inputs, init failure cleanup and KE error propagation preserved");
+ puts("PASS: Darwin 23/24/25, 65536 CP families each; only enum 5 adds native PSP; bad inputs and init cleanup preserved; native Tahoe KE errors preserved");
 #endif
 }
 '''

@@ -487,7 +487,7 @@ void UserSurfaceSync::init(KernelPatcher& patcher)
     submitGuard     = checkKernelArgument("-NRedDisplayFix");
     legacyBlend = renderRequested = submitGuard;
     computeScratch = srdShared = submitGuard && currentKernelVersion().majorMatches(MACOS_26);
-    NRed::singleton().setProp32("NRedDisplayFixVersion", 1);
+    NRed::singleton().setProp32("NRedDisplayFixVersion", 2);
     NRed::singleton().setProp32("NRedSubmitGuardVersion", 1);
     NRed::singleton().setProp32("NRedSubmitGuardRevision", 6);
     NRed::singleton().setProp32("NRedImmediateSyncVersion", 1);
@@ -530,7 +530,7 @@ void UserSurfaceSync::init(KernelPatcher& patcher)
         patcher.clearError(); NRed::singleton().setProp32("NRedImmediateSyncRejected", 2); return;
     }
     NRed::singleton().setProp32("NRedDisplayFixEnabled", 1);
-    if (renderRequested && !legacyProfile) { NRed::singleton().setProp32("NRedImmediateSyncEnabled", 1); }
+    NRed::singleton().setProp32("NRedImmediateSyncDisabled", 1);
     NRed::singleton().setProp32("NRedImmediateSyncRegionQueryVersion", 1);
     if (submitGuard) {
         NRed::singleton().setProp32("NRedSubmitGuardEnabled", 1);
@@ -538,7 +538,7 @@ void UserSurfaceSync::init(KernelPatcher& patcher)
     }
     if (srdShared) {
         NRed::singleton().setProp32("NRedSrdSharedEnabled", 1);
-        SYSLOG("UserSurfaceSync", "SrdShared-v1 enabled on ImmediateSync baseline: exact cache/code required");
+        SYSLOG("UserSurfaceSync", "SrdShared enabled with native synchronization: exact cache/code required");
     }
     if (legacyBlend) {
         NRed::singleton().setProp32("NRedLegacyBlendEnabled", 1);

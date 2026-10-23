@@ -164,6 +164,35 @@ GUARD = r'''
  puts("PASS actual SubmitGuard: display switch on Darwin 23/24/25; full trampoline identity, failure rollback, RX/max, allocation lifetime");
 '''
 
+FAIRPLAY = r'''
+  // 独立预期：13 项 AMD 解码补丁（含 PSP 工厂），最后一项 AppleGVA 保持原样。
+  assert(profile->patchCount==14&&profile->fairPlayMask==0x1FFF);
+  assert(profile->patches[12].offset==(major==23?0x3033A69FAULL:0x30860FEC7ULL));
+  auto checkSelected=[&](bool patched){for(unsigned i=0;i<14;i++){
+   const auto& p=profile->patches[i];uint8_t b[512];assert(reader(cacheBase+p.offset,b,p.size)==0);
+   assert(memcmp(b,patched&&i<13?p.patched:p.original,p.size)==0);
+  }};
+  std::set<uint64_t> selectedPages;
+  for(unsigned i=0;i<13;i++)selectedPages.insert((cacheBase+profile->patches[i].offset)&~uint64_t(4095));
+  reset(profile);fairPlay=true;call();assert(writes==13&&protects==3*selectedPages.size());
+  checkSelected(true);rx();assert(properties.at("NRedDRMVideoPatchCount")==13&&properties.at("NRedDRMVideoState")==2);
+  before=writes;call();assert(writes==before&&properties.at("NRedDRMVideoState")==3);
+  for(unsigned failure=1;failure<=13;failure++){
+   reset(profile);fairPlay=true;auto original=memory;failWrite={failure};call();assert(memory==original);
+   checkSelected(false);rx();assert(properties.at("NRedDRMVideoState")==1);
+  }
+  for(unsigned failure=1;failure<=selectedPages.size();failure++){
+   reset(profile);fairPlay=true;auto original=memory;failProtect={failure};call();assert(memory==original&&writes==0);rx();
+  }
+  reset(profile);fairPlay=true;auto pristine=memory;
+  failProtect={unsigned(selectedPages.size())+1,unsigned(selectedPages.size())+2};call();assert(memory==pristine);rx();
+  for(unsigned i=0;i<14;i++){
+   reset(profile);fairPlay=true;const auto& p=profile->patches[i];
+   memcpy(memory.at((cacheBase+p.offset)&~uint64_t(4095)).data()+((cacheBase+p.offset)&4095),p.patched,p.size);
+   auto mixed=memory;call();assert(memory==mixed&&writes==0&&protects==0);
+  }
+'''
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -185,8 +214,7 @@ def main():
             'UserLegacyData::metal(major)' if module == 'UserSurfaceSync' else 'UserLegacyData::video(major,device)')
         main_code = main_code.replace('DEVICES', '{0x15D8U,0x15DDU,0x15E7U,0x1636U,0x1638U,0x164CU}'
                                      if module == 'UserSurfaceSync' else '{0x15E7U,0x1636U,0x1638U,0x164CU}')
-        main_code = main_code.replace('FAIRPLAY', '' if module == 'UserSurfaceSync' else
-            'reset(profile);fairPlay=true;call();assert(writes==0&&protects==0);')
+        main_code = main_code.replace('FAIRPLAY', '' if module == 'UserSurfaceSync' else FAIRPLAY)
         main_code = main_code.replace('GUARD', GUARD if module == 'UserSurfaceSync' else '')
         main_code = main_code.replace('SUBMIT_OFF', 'submitGuard=false;' if module == 'UserSurfaceSync' else '')
         text = COMMON.replace('BODY', body).replace('INIT', init).replace('MAIN', main_code)

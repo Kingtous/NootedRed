@@ -25,6 +25,7 @@ namespace UserLegacyCompat
         UInt32       pageCount;
         const Patch* patches;
         UInt32       patchCount;
+        UInt32       fairPlayMask{0};
     };
 
     inline bool matchesPatchedByte(UInt8 value, UInt64 position, const Profile& profile)

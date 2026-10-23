@@ -10,7 +10,8 @@ ComputeScratch 为 NRed 原生支持的六种 Vega APU；视频为四种 VCN 2.2
 
 公共组件按职责分两层：`UserSharedCache.hpp` 负责有读取预算的缓存元数据、映像与 Mach-O 解析；
 `UserCacheResolver.hpp` 负责完整字节核验、唯一候选扫描、相对引用和绑定核验、载荷重建。
-ImmediateSync、SrdShared、LegacyBlend、ComputeScratch 和视频补丁都复用这些基础能力。
+SrdShared、LegacyBlend、ComputeScratch 和视频补丁都复用这些基础能力；当前显示组合保留原生同步，
+不再清除延迟同步位。历史 ImmediateSync 载荷仅保留作回归和旧状态拒绝依据。
 `UserSurfaceSyncResolver.hpp` 保留渲染策略关系及 Metal 专属目标核验，
 `UserVideoDecodeResolver.hpp` 保留视频计划；公共层不依赖任一生成数据头。
 `tools/cache_resolver_data.py` 共用生成完整函数、指令／数据分界及引用描述的逻辑。
@@ -39,7 +40,8 @@ ComputeScratch 同时核验已撤回 VT 跳转所在的完整原生函数，未�
 为实际 UUID 的四个原始 32 位字，不是兼容性白名单。
 相应 `DynamicMatched`、`DynamicApplied`、`DynamicRejected`、`DynamicReads`
 记录动态核验、完成写入并恢复 RX、拒绝和读取次数。
-渲染诊断 `NRedImmediateSyncRevision=4` 用于区分含动态 Scratch 的版本。
+渲染诊断 `NRedImmediateSyncRevision=4` 是历史事务版本名称；当前修复组合由
+`NRedDisplayFixVersion=2`、`NRedImmediateSyncDisabled=1` 标识。
 
 离线回归包括六种 Scratch 设备、四种视频设备、重排映像／函数／GOT、跨页部分写入、
 权限失败、幂等与撤回策略拒绝，并提供 ASan/UBSan。只读参考缓存回归还核对动态计划

@@ -157,10 +157,12 @@ namespace
     };
 
     bool selectFairPlayDecode(const UInt64 base, const UserVideoDecodeData::Patch* patches, UInt32& count,
-                              UserVideoDecodeData::Patch* selected)
+                              UserVideoDecodeData::Patch* selected, const UInt32 mask)
     {
         using namespace UserVideoDecodeData;
-        if (count != PatchCount || FairPlayDecodeMask == 0) { return false; }
+        if (count == 0 || count > PatchCount || count > 32 || mask == 0 || (count < 32 && (mask >> count) != 0)) {
+            return false;
+        }
         UInt32 selectedCount{0};
         UInt8  bytes[MaxPatchSize];
         for (UInt32 i = 0; i < count; ++i) {
@@ -170,7 +172,7 @@ namespace
             {
                 return false;
             }
-            if ((FairPlayDecodeMask & (1U << i)) != 0) { selected[selectedCount++] = patch; }
+            if ((mask & (1U << i)) != 0) { selected[selectedCount++] = patch; }
             else if (readUser(base + patch.offset, bytes, patch.size) != 0
                      || memcmp(bytes, patch.original, patch.size) != 0)
             {
@@ -195,7 +197,7 @@ namespace
         UInt32 fairPlayPID{0};
         if (UserPatchPolicy::isFairPlayClient(current_task())) {
             const auto pid = process != nullptr ? proc_pid(process) : -1;
-            if (!fairPlayDriverOnly || legacyProfile) {
+            if (!fairPlayDriverOnly) {
                 if (pid > 0) { NRed::singleton().setProp32("NRedVCNFairPlaySkipPID", static_cast<UInt32>(pid)); }
                 NRed::singleton().setProp32("NRedVCNFairPlaySkipped", 1);
                 return result;
@@ -272,7 +274,8 @@ namespace
         }
 
         if (fairPlayDecode) {
-            if (!selectFairPlayDecode(base, patches, patchCount, legacyPatches)) {
+            const auto mask = legacyProfile ? legacyProfile->fairPlayMask : FairPlayDecodeMask;
+            if (!selectFairPlayDecode(base, patches, patchCount, legacyPatches, mask)) {
                 stage(Stage::CodeMismatch, fairPlayPID);
                 return result;
             }
@@ -402,7 +405,7 @@ void UserVideoDecode::init(KernelPatcher& patcher)
         NRed::singleton().setProp32("NRedVCNUserRejected", 3);
         return;
     }
-    fairPlayDriverOnly = currentKernelVersion().major() == 25;
+    fairPlayDriverOnly = true;
     getTaskMap         = reinterpret_cast<GetTaskMap>(patcher.solveSymbol(KernelPatcher::KernelID, "_get_task_map"));
     patcher.clearError();
     queryRegion =
@@ -426,7 +429,8 @@ void UserVideoDecode::init(KernelPatcher& patcher)
     NRed::singleton().setProp32("NRedVCNRegionQueryVersion", 1);
     if (fairPlayDriverOnly) {
         NRed::singleton().setProp32("NRedDRMVideoEnabled", 1);
-        NRed::singleton().setProp32("NRedDRMVideoRevision", 3);
-        NRed::singleton().setProp32("NRedDRMVideoMask", UserVideoDecodeData::FairPlayDecodeMask);
+        NRed::singleton().setProp32("NRedDRMVideoRevision", 4);
+        NRed::singleton().setProp32("NRedDRMVideoMask", legacyProfile ? legacyProfile->fairPlayMask :
+                                                                        UserVideoDecodeData::FairPlayDecodeMask);
     }
 }

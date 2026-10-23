@@ -19,7 +19,9 @@
 不能仅凭该值证明控制权切换。`=0`、其他无效值或省略参数均不启动 EC 服务。
 
 显示开关在 macOS 14/15 启用 LegacyBlend 和 SubmitGuard，在 26 启用
-ImmediateSync、SrdShared、LegacyBlend、ComputeScratch 和 SubmitGuard。
+SrdShared、LegacyBlend、ComputeScratch 和 SubmitGuard，保留原生同步策略，不再启用 ImmediateSync。
+`NRedDisplayFixVersion=2` 标记这个组合；`NRedImmediateSync*` 继续作为历史页面事务诊断名称，
+`NRedImmediateSyncDisabled=1` 表示立即同步修复未启用。
 **本版不含 HDRIntegerFilter 候选的运行代码与补丁数据。**
 设备、缓存、完整代码和 ABI 核验仍然生效，具体版本边界见
 [多系统适配](macos-multi-os-compat.md)。
@@ -42,10 +44,11 @@ NRedECBacklight=1 NRedECBacklight=2
 
 ## FairPlay 客户端兼容
 
-FairPlay 兼容随 `-NRedVideoFix` 默认启用，仅在 macOS 26 / Darwin 25 的
+FairPlay 兼容随 `-NRedVideoFix` 默认启用，在 macOS 14/15/26 / Darwin 23/24/25 的
 受支持 VCN 2.2 APU 上生效，不再需要 `-NRedDRMVideo`。所有持有 `com.apple.private.fpsd.client=true`
 权限的进程统一应用 AMD 驱动侧解码子集及内容保护工厂 PSP 适配，不再按 Music／TV 等进程名区分；
-AppleGVA 与编码代码保持原样。macOS 14/15 的 FairPlay 客户端继续跳过视频补丁。
-`NRedDRMVideoRevision=3` 标识统一权限策略，不代表 DRM 视频已修复。
+AppleGVA 与编码代码保持原样。14/15 按各自完整原始页面核验，选择 13 项 AMD 解码补丁；
+26 保留 18 项及原有动态匹配。三个系统采用相同策略，但补丁条目随已核实的版本数据不同。
+`NRedDRMVideoRevision=4` 标识三系统统一权限策略，不代表 DRM 视频已修复。
 既有 Music 实测为普通音乐正常、受保护 MV 有声且进度推进，但视频仍黑屏；统一版本的
 Music／TV 实机回归尚待验证。范围、诊断和验证步骤见 [FairPlay PSP 兼容说明](fairplay-psp-compatibility.md)。
