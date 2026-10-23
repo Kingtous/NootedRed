@@ -249,8 +249,12 @@ struct PatchWorkspace
 
 struct WorkspaceBuffer
 {
-    PatchWorkspace* value{IONew(PatchWorkspace, 1)};
-    WorkspaceBuffer() { if (value) { memset(value, 0, sizeof(*value)); } }
+    PatchWorkspace* value{nullptr};
+    WorkspaceBuffer()
+    {
+        value = IONew(PatchWorkspace, 1);
+        if (value) { memset(value, 0, sizeof(*value)); }
+    }
     ~WorkspaceBuffer() { if (value) { IODelete(value, PatchWorkspace, 1); } }
     WorkspaceBuffer(const WorkspaceBuffer&) = delete;
     WorkspaceBuffer& operator=(const WorkspaceBuffer&) = delete;

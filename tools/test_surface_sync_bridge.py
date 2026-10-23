@@ -52,7 +52,7 @@ static bool failWorkspaceAllocation=false;
 static unsigned liveWorkspaces=0;
 template<class T>T* testNew(size_t n){if(failWorkspaceAllocation)return nullptr;auto* p=new T[n];liveWorkspaces++;return p;}
 template<class T>void testDelete(T* p){assert(liveWorkspaces>0);liveWorkspaces--;delete[] p;}
-#define IONew(T,N) testNew<T>(N)
+#define IONew(T,N) ({ testNew<T>(N); })
 #define IODelete(P,T,N) testDelete(P)
 using vm_address_t=uint64_t;
 constexpr int VM_PROT_NONE=0,VM_PROT_READ=1,VM_PROT_WRITE=2,VM_PROT_EXECUTE=4,VM_PROT_COPY=16;
