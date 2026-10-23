@@ -39,7 +39,7 @@ jobs:
         run: |
           python3 tools/test_ec_backlight_service.py
           python3 tools/test_ec_backlight_service.py --thread-sanitizer
-      - run: xcodebuild -configuration Debug -arch x86_64 DEBUG_INFORMATION_FORMAT=dwarf-with-dsym build
+      - run: xcodebuild -configuration Debug -arch x86_64 GCC_GENERATE_DEBUGGING_SYMBOLS=YES DEBUG_INFORMATION_FORMAT=dwarf-with-dsym build
       - run: xcodebuild -configuration Research\ Release -arch x86_64 build
       - run: xcodebuild -configuration Release -arch x86_64 build
       - name: Check IOKit class symbols
