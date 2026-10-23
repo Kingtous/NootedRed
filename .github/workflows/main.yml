@@ -51,8 +51,8 @@ jobs:
       - name: Record shared-region symbols
         run: |
           for config in Debug 'Research Release' Release; do
-            xcrun dwarfdump --uuid "build/$config/NootedRed.kext" > "build/diagnostics/$config-uuid.txt"
-            xcrun dwarfdump --name=wrappedSharedRegionCheck "build/$config/NootedRed.kext.dSYM" > "build/diagnostics/$config-wrappers.txt"
+            xcrun dwarfdump --uuid "build/$config/NootedRed.kext/Contents/MacOS/NootedRed" > "build/diagnostics/$config-uuid.txt"
+            xcrun dwarfdump --name=wrappedSharedRegionCheck "build/$config/NootedRed.kext.dSYM/Contents/Resources/DWARF/NootedRed" > "build/diagnostics/$config-wrappers.txt"
           done
       - name: Upload to Artifacts
         if: always()
