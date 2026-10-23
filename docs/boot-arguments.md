@@ -39,3 +39,13 @@ NRedECBacklight=1 NRedECBacklight=2
 诊断属性仍沿用模块名，例如 `NRedVCN*`、`NRedComputeScratch*`、`NRedECBacklight` 服务。
 这些名称是运行状态，不是旧参数兼容入口。
 `Enabled` 仅表示已注册；确认实际补丁写入还需检查 `Applied`／`WindowServerApplied`。
+
+## FairPlay 客户端兼容
+
+FairPlay 兼容随 `-NRedVideoFix` 默认启用，仅在 macOS 26 / Darwin 25 的
+受支持 VCN 2.2 APU 上生效，不再需要 `-NRedDRMVideo`。所有持有 `com.apple.private.fpsd.client=true`
+权限的进程统一应用 AMD 驱动侧解码子集及内容保护工厂 PSP 适配，不再按 Music／TV 等进程名区分；
+AppleGVA 与编码代码保持原样。macOS 14/15 的 FairPlay 客户端继续跳过视频补丁。
+`NRedDRMVideoRevision=3` 标识统一权限策略，不代表 DRM 视频已修复。
+既有 Music 实测为普通音乐正常、受保护 MV 有声且进度推进，但视频仍黑屏；统一版本的
+Music／TV 实机回归尚待验证。范围、诊断和验证步骤见 [FairPlay PSP 兼容说明](fairplay-psp-compatibility.md)。

@@ -31,15 +31,16 @@ namespace
     using CopyIn            = int                  (*)(user_addr_t, void*, size_t);
     using CopyOut           = int                 (*)(const void*, user_addr_t, size_t);
 
-    mach_vm_address_t originalCheck{0};
-    GetTaskMap        getTaskMap{nullptr};
-    RegionRecurse     queryRegion{nullptr};
-    CopyIn            readUser{nullptr};
-    CopyOut           writeUser{nullptr};
-    UInt32            seenStages{0}, appliedCount{0}, errorCount{0};
+    mach_vm_address_t                 originalCheck{0};
+    GetTaskMap                        getTaskMap{nullptr};
+    RegionRecurse                     queryRegion{nullptr};
+    CopyIn                            readUser{nullptr};
+    CopyOut                           writeUser{nullptr};
+    UInt32                            seenStages{0}, appliedCount{0}, errorCount{0};
+    bool                              fairPlayDriverOnly{false};
     const UserVideoDecodeData::Patch* devicePatches{nullptr};
     const UserLegacyCompat::Profile*  legacyProfile{nullptr};
-    constexpr auto    PatchCount = arrsize(UserVideoDecodeData::Patches);
+    constexpr auto                    PatchCount   = arrsize(UserVideoDecodeData::Patches);
     constexpr UInt32                  MaxPageCount = PatchCount * 2;
     static_assert(PatchCount <= 32 && UserVideoDecodeData::PageCount <= 16);
 
@@ -63,13 +64,17 @@ namespace
         Applied
     };
 
-    void stage(const Stage value)
+    void stage(const Stage value, const UInt32 fairPlayPID = 0)
     {
         static const char* const keys[] = {"NRedVCNUserD00", "NRedVCNUserD01", "NRedVCNUserD02", "NRedVCNUserD03",
                                            "NRedVCNUserD04", "NRedVCNUserD05", "NRedVCNUserD06", "NRedVCNUserD07",
                                            "NRedVCNUserD08", "NRedVCNUserD09", "NRedVCNUserD10", "NRedVCNUserD11",
                                            "NRedVCNUserD12", "NRedVCNUserD13", "NRedVCNUserD14", "NRedVCNUserD15"};
         const auto               index  = static_cast<UInt32>(value);
+        if (fairPlayPID != 0) {
+            NRed::singleton().setProp32("NRedDRMVideoLastPID", fairPlayPID);
+            NRed::singleton().setProp32("NRedDRMVideoLastStage", index);
+        }
         if ((__atomic_fetch_or(&seenStages, 1U << index, __ATOMIC_RELAXED) & (1U << index)) == 0) {
             NRed::singleton().setProp32(keys[index], 1);
             if (value == Stage::Applied) { NRed::singleton().setProp32("NRedVCNGVASelectionFix", 1); }
@@ -94,12 +99,12 @@ namespace
     {
         natural_t depth{0};
         for (UInt32 attempt = 0; attempt < 8; ++attempt) {
-            auto                            address = page;
-            mach_vm_size_t                  size{0};
+            auto           address = page;
+            mach_vm_size_t size{0};
             // 只查询映射与权限，避免完整查询逐页统计整个共享缓存区域。
             vm_region_submap_short_info_data_64_t info{};
-            mach_msg_type_number_t count = VM_REGION_SUBMAP_SHORT_INFO_COUNT_64;
-            const auto                      result =
+            mach_msg_type_number_t                count = VM_REGION_SUBMAP_SHORT_INFO_COUNT_64;
+            const auto                            result =
                 queryRegion(map, &address, &size, &depth, reinterpret_cast<vm_region_recurse_info_t>(&info), &count);
             if (result != KERN_SUCCESS) {
                 error(result);
@@ -168,12 +173,12 @@ namespace
                   const UserVideoDecodeData::Patch* patches, const SavedRow* saved, const UInt32 touched)
     {
         using namespace UserVideoDecodeData;
-        bool              ok      = true;
+        bool ok = true;
         for (UInt32 i = 0; i < touched; ++i) {
-            const auto address     = base + patches[i].offset;
-            const auto first       = address & ~static_cast<UInt64>(PAGE_SIZE - 1);
-            const auto last        = (address + patches[i].size - 1) & ~static_cast<UInt64>(PAGE_SIZE - 1);
-            bool       ready       = true;
+            const auto address = base + patches[i].offset;
+            const auto first   = address & ~static_cast<UInt64>(PAGE_SIZE - 1);
+            const auto last    = (address + patches[i].size - 1) & ~static_cast<UInt64>(PAGE_SIZE - 1);
+            bool       ready   = true;
             for (auto pageAddress = first; pageAddress <= last; pageAddress += PAGE_SIZE) {
                 Page* page = nullptr;
                 for (UInt32 p = 0; p < pageCount; ++p) {
@@ -224,6 +229,31 @@ namespace
         }
     };
 
+    bool selectFairPlayDecode(const UInt64 base, const UserVideoDecodeData::Patch* patches, UInt32& count,
+                              UserVideoDecodeData::Patch* selected)
+    {
+        using namespace UserVideoDecodeData;
+        if (count != PatchCount || FairPlayDecodeMask == 0) { return false; }
+        UInt32 selectedCount{0};
+        UInt8  bytes[MaxPatchSize];
+        for (UInt32 i = 0; i < count; ++i) {
+            const auto& patch = patches[i];
+            if (patch.size == 0 || patch.size > MaxPatchSize || patch.offset >= UserSharedCache::UserLimit - base
+                || patch.size >= UserSharedCache::UserLimit - base - patch.offset)
+            {
+                return false;
+            }
+            if ((FairPlayDecodeMask & (1U << i)) != 0) { selected[selectedCount++] = patch; }
+            else if (readUser(base + patch.offset, bytes, patch.size) != 0
+                     || memcmp(bytes, patch.original, patch.size) != 0)
+            {
+                return false;
+            }
+        }
+        count = selectedCount;
+        return selectedCount != 0;
+    }
+
     int wrappedSharedRegionCheck(proc_t process, SharedRegionCheckArgs* args, int* returnValue)
     {
         stage(Stage::Called);
@@ -232,26 +262,31 @@ namespace
             stage(Stage::OriginalError);
             return result;
         }
-        // FairPlay 客户端必须保持视频驱动原生代码：打过 VCN 补丁的 AppleGVA/VADriver 页面
-        // 会使受保护内容的 key request 生成失败（Music 实测 -15842）。实际解码在
-        // VTDecoderXPCService（无 fpsd entitlement）中完成，该进程仍会应用 VCN 补丁。
+        // 按 FairPlay 权限统一选择策略；客户端只允许 AMD 驱动侧解码项，
+        // 保留 AppleGVA 和编码代码原样。
+        bool   fairPlayDecode{false};
+        UInt32 fairPlayPID{0};
         if (UserPatchPolicy::isFairPlayClient(current_task())) {
             const auto pid = process != nullptr ? proc_pid(process) : -1;
-            if (pid > 0) { NRed::singleton().setProp32("NRedVCNFairPlaySkipPID", static_cast<UInt32>(pid)); }
-            NRed::singleton().setProp32("NRedVCNFairPlaySkipped", 1);
-            return result;
+            if (!fairPlayDriverOnly || legacyProfile) {
+                if (pid > 0) { NRed::singleton().setProp32("NRedVCNFairPlaySkipPID", static_cast<UInt32>(pid)); }
+                NRed::singleton().setProp32("NRedVCNFairPlaySkipped", 1);
+                return result;
+            }
+            fairPlayDecode = true;
+            if (pid > 0) { fairPlayPID = static_cast<UInt32>(pid); }
         }
         if (!VCN::allocated() || !devicePatches) {
-            stage(Stage::NoMap);
+            stage(Stage::NoMap, fairPlayPID);
             return result;
         }
         if (args == nullptr || args->startAddress == 0) {
-            stage(Stage::Argument);
+            stage(Stage::Argument, fairPlayPID);
             return result;
         }
         using namespace UserVideoDecodeData;
-        const auto*       patches    = devicePatches;
-        const UInt32      patchCount = legacyProfile ? legacyProfile->patchCount : static_cast<UInt32>(PatchCount);
+        const auto* patches    = devicePatches;
+        UInt32      patchCount = legacyProfile ? legacyProfile->patchCount : static_cast<UInt32>(PatchCount);
         UserVideoDecodeData::Patch legacyPatches[PatchCount];
         if (legacyProfile) {
             if (patchCount > PatchCount) { return result; }
@@ -261,18 +296,23 @@ namespace
             }
             patches = legacyPatches;
         }
-        UInt64            base{0};
-        UInt8             header[104];
+        UInt64 base{0};
+        UInt8  header[104];
         if (readUser(args->startAddress, &base, sizeof(base)) != 0 || base == 0
             || base >= UserSharedCache::UserLimit - sizeof(header) || (base & (PAGE_SIZE - 1)) != 0
             || readUser(base, header, sizeof(header)) != 0)
         {
-            stage(Stage::CacheRead);
+            stage(Stage::CacheRead, fairPlayPID);
             return result;
         }
         if (memcmp(header, CacheMagic, sizeof(CacheMagic)) != 0) {
-            stage(Stage::CacheMismatch);
+            stage(Stage::CacheMismatch, fairPlayPID);
             return result;
+        }
+
+        if (fairPlayDecode) {
+            NRed::singleton().setProp32("NRedDRMVideoPID", fairPlayPID);
+            NRed::singleton().setProp32("NRedDRMVideoState", 1);
         }
 
         const char* const uuidKeys[] = {"NRedVCNUserCacheUUID0", "NRedVCNUserCacheUUID1", "NRedVCNUserCacheUUID2",
@@ -283,7 +323,7 @@ namespace
             NRed::singleton().setProp32(uuidKeys[i], value);
         }
         if (legacyProfile && !UserLegacyCompat::matches(readUser, base, header + 88, *legacyProfile)) {
-            stage(Stage::CacheMismatch);
+            stage(Stage::CacheMismatch, fairPlayPID);
             NRed::singleton().setProp32("NRedVCNUserLegacyRejected", 1);
             return result;
         }
@@ -295,13 +335,22 @@ namespace
                 return result;
             }
             if (!UserVideoDecodeResolver::resolve(readUser, base, devicePatches, *dynamicBuffer.plan)) {
-                stage(Stage::CacheMismatch);
+                stage(Stage::CacheMismatch, fairPlayPID);
                 NRed::singleton().setProp32("NRedVCNUserDynamicRejected", 1);
                 return result;
             }
             patches = dynamicBuffer.plan->patches;
             NRed::singleton().setProp32("NRedVCNUserDynamicMatched", 1);
             NRed::singleton().setProp32("NRedVCNUserDynamicReads", dynamicBuffer.plan->reads);
+        }
+
+        if (fairPlayDecode) {
+            if (!selectFairPlayDecode(base, patches, patchCount, legacyPatches)) {
+                stage(Stage::CodeMismatch, fairPlayPID);
+                return result;
+            }
+            patches = legacyPatches;
+            NRed::singleton().setProp32("NRedDRMVideoPatchCount", patchCount);
         }
 
         SavedBuffer buffer;
@@ -320,7 +369,7 @@ namespace
                 || patches[i].size >= UserSharedCache::UserLimit - base - patches[i].offset
                 || readUser(address, saved[i].bytes, patches[i].size) != 0)
             {
-                stage(Stage::CodeRead);
+                stage(Stage::CodeRead, fairPlayPID);
                 return result;
             }
             if (memcmp(saved[i].bytes, patches[i].original, patches[i].size) == 0) { ++originals; }
@@ -328,7 +377,7 @@ namespace
                 ++patched;
             }
             else {
-                stage(Stage::CodeMismatch);
+                stage(Stage::CodeMismatch, fairPlayPID);
                 error(KERN_INVALID_ARGUMENT);
                 return result;
             }
@@ -343,7 +392,7 @@ namespace
                 }
                 if (!found) {
                     if (pageCount == MaxPageCount) {
-                        stage(Stage::CodeMismatch);
+                        stage(Stage::CodeMismatch, fairPlayPID);
                         return result;
                     }
                     pages[pageCount++].address = pageAddress;
@@ -351,23 +400,24 @@ namespace
             }
         }
         if (patched == patchCount) {
-            stage(Stage::Already);
+            stage(Stage::Already, fairPlayPID);
+            if (fairPlayDecode) { NRed::singleton().setProp32("NRedDRMVideoState", 3); }
             return result;
         }
         if (originals != patchCount) {
-            stage(Stage::Mixed);
+            stage(Stage::Mixed, fairPlayPID);
             return result;
         }
         vm_map_t map = getTaskMap(current_task());
         if (map == nullptr) {
-            stage(Stage::NoMap);
+            stage(Stage::NoMap, fairPlayPID);
             return result;
         }
         for (UInt32 p = 0; p < pageCount; ++p) {
             if (!leafProtection(map, pages[p].address, pages[p].protection)
                 || pages[p].protection != (VM_PROT_READ | VM_PROT_EXECUTE))
             {
-                stage(Stage::Region);
+                stage(Stage::Region, fairPlayPID);
                 return result;
             }
         }
@@ -376,27 +426,28 @@ namespace
             const auto protection =
                 vm_protect(map, pages[p].address, PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
             if (protection != KERN_SUCCESS) {
-                stage(Stage::Protection);
+                stage(Stage::Protection, fairPlayPID);
                 error(protection);
-                if (!restorePages(map, pages, pageCount)) { stage(Stage::Rollback); }
+                if (!restorePages(map, pages, pageCount)) { stage(Stage::Rollback, fairPlayPID); }
                 return result;
             }
             pages[p].writable = true;
         }
         for (UInt32 i = 0; i < patchCount; ++i) {
             if (writeUser(patches[i].patched, base + patches[i].offset, patches[i].size) != 0) {
-                stage(Stage::Write);
+                stage(Stage::Write, fairPlayPID);
                 error(KERN_FAILURE);
                 rollback(map, pages, pageCount, base, patches, saved, i + 1);
                 return result;
             }
         }
         if (!restorePages(map, pages, pageCount)) {
-            stage(Stage::Restore);
+            stage(Stage::Restore, fairPlayPID);
             rollback(map, pages, pageCount, base, patches, saved, patchCount);
             return result;
         }
-        stage(Stage::Applied);
+        stage(Stage::Applied, fairPlayPID);
+        if (fairPlayDecode) { NRed::singleton().setProp32("NRedDRMVideoState", 2); }
         if (dynamic) { NRed::singleton().setProp32("NRedVCNUserDynamicApplied", 1); }
         if (process != nullptr) {
             const auto pid = proc_pid(process);
@@ -417,6 +468,7 @@ namespace
 
 void UserVideoDecode::init(KernelPatcher& patcher)
 {
+    fairPlayDriverOnly = false;
     if (!checkKernelArgument("-NRedVideoFix")) { return; }
     const auto  deviceID   = NRed::singleton().getDeviceID();
     const auto* capability = VCNCapabilities::findDevice(deviceID);
@@ -437,7 +489,8 @@ void UserVideoDecode::init(KernelPatcher& patcher)
         NRed::singleton().setProp32("NRedVCNUserRejected", 3);
         return;
     }
-    getTaskMap = reinterpret_cast<GetTaskMap>(patcher.solveSymbol(KernelPatcher::KernelID, "_get_task_map"));
+    fairPlayDriverOnly = currentKernelVersion().major() == 25;
+    getTaskMap         = reinterpret_cast<GetTaskMap>(patcher.solveSymbol(KernelPatcher::KernelID, "_get_task_map"));
     patcher.clearError();
     queryRegion =
         reinterpret_cast<RegionRecurse>(patcher.solveSymbol(KernelPatcher::KernelID, "_mach_vm_region_recurse"));
@@ -458,4 +511,9 @@ void UserVideoDecode::init(KernelPatcher& patcher)
     }
     NRed::singleton().setProp32("NRedVCNUserEnabled", 1);
     NRed::singleton().setProp32("NRedVCNRegionQueryVersion", 1);
+    if (fairPlayDriverOnly) {
+        NRed::singleton().setProp32("NRedDRMVideoEnabled", 1);
+        NRed::singleton().setProp32("NRedDRMVideoRevision", 3);
+        NRed::singleton().setProp32("NRedDRMVideoMask", UserVideoDecodeData::FairPlayDecodeMask);
+    }
 }

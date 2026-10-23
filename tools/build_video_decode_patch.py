@@ -17,6 +17,8 @@ GVA_CHOICE_ADDRESS = 0x7FFA0C59BBAC
 GVA_CHOICE_SIZE = 1136
 GVA_CHOICE_SHA256 = "b7c725552045a9db206ab2eed4edda7ea3d27a29de2feee782204c362764a33d"
 HASHES = {
+    "__ZN11VACPFactory8createCPEP11_VAHWConfigP11VAIOConnectPP4VACp":
+        "e63a2259ad470bd088d623edc778be34f9f6630fc6156bf6cac808c381b15aa6",
     "__ZN17VAAcceleratorInfo8identifyEjj": "d7c579bce55c5724ec241f7f9abece9d0f23b1c30178d2f539fc0cabf41dc0bd",
     "__ZN18VAAddrLibInterface4initEP11VAIOConnectP13sHardwareInfo":
         "b35bd96d6ca0b8bd9047af67fc3f0f77ef09242f684c65e17d4cee062af155ea",
@@ -135,10 +137,11 @@ def main():
             full_functions[name] = (address, context)
             return address, code
 
-        def add(name, address, original, patched):
+        def add(name, address, original, patched, *, fairplay_decode=False):
             if len(original) != len(patched):
                 raise ValueError("补丁长度不相等")
-            records.append({"label": name, "address": address, "original": original.hex(), "patched": patched.hex()})
+            records.append({"label": name, "address": address, "original": original.hex(), "patched": patched.hex(),
+                            "fairplayDecode": fairplay_decode})
 
         gva_choice = cache.read(GVA_CHOICE_ADDRESS, GVA_CHOICE_SIZE)
         if hashlib.sha256(gva_choice).hexdigest() != GVA_CHOICE_SHA256:
@@ -152,12 +155,13 @@ def main():
         name = "__ZN17VAAcceleratorInfo8identifyEjj"
         address, original = function(name)
         identify_variants = {device: identify_payload(original, device, family) for device, family in capabilities}
-        add(name, address, original, identify_variants[0x1638])
+        add(name, address, original, identify_variants[0x1638], fairplay_decode=True)
         for name, offset in [("__ZN9VAFactory20createGraphicsEngineEP9VAContext", 10),
                              ("__ZN9VAFactory14createImageBltEP9VAContextj", 11)]:
             address, code = function(name)
             assert code[offset:offset + 10] == bytes.fromhex("488b86600400008b400c")
-            add(name, address + offset, code[offset:offset + 10], bytes.fromhex("b8020000009090909090"))
+            add(name, address + offset, code[offset:offset + 10], bytes.fromhex("b8020000009090909090"),
+                fairplay_decode=True)
         for name in HASHES:
             if "VPEi" not in name:
                 continue
@@ -168,18 +172,24 @@ def main():
             assert code[offset + 7] < 0x80
             target = offset + 8 + code[offset + 7]
             patched = b"\xbe\x02\x00\x00\x00\xeb" + bytes([target - offset - 7]) + b"\x90"
-            add(name, address + offset, code[offset:offset + 8], patched)
+            add(name, address + offset, code[offset:offset + 8], patched, fairplay_decode=True)
         name = "__ZN18VAAddrLibInterface4initEP11VAIOConnectP13sHardwareInfo"
         address, code = function(name)
         assert code[0x8B:0x92] == bytes.fromhex("4181fc8d000000")
-        add(name, address + 0x8E, b"\x8d", b"\x8e")
+        add(name, address + 0x8E, b"\x8d", b"\x8e", fairplay_decode=True)
+        name = "__ZN11VACPFactory8createCPEP11_VAHWConfigP11VAIOConnectPP4VACp"
+        address, code = function(name)
+        assert code[0x3F:0x44] == bytes.fromhex("83f9047317")
+        # APU 识别复用 VCN2 枚举 5；内容保护工厂需承接到已有 PSP 实现。
+        add(name, address + 0x41, b"\x04", b"\x05", fairplay_decode=True)
         name = "__ZN4Addr3Lib6CreateEPK18_ADDR_CREATE_INPUTP19_ADDR_CREATE_OUTPUT"
         address, code = function(name)
         assert code[0xB5:0xBA] == bytes.fromhex("3d8d000000")
-        add(name, address + 0xB6, b"\x8d", b"\x8e")
+        add(name, address + 0xB6, b"\x8d", b"\x8e", fairplay_decode=True)
         name = "__ZN4Addr2V27Gfx9Lib20HwlConvertChipFamilyEjj"
         address, code = function(name)
-        add(name, address, code, compile_payload((ROOT / "tools/video_addr_convert.s").read_text(), "addr-convert"))
+        add(name, address, code, compile_payload((ROOT / "tools/video_addr_convert.s").read_text(), "addr-convert"),
+            fairplay_decode=True)
         # 本机固件写入 48 字节反馈；原生 Vcn2 使用 164 字节，后续帧因此读到零或无关数据。
         name = "__ZN14Vcn2EncCommand15getFeedbackSizeEv"
         address, code = function(name)
@@ -211,12 +221,21 @@ def main():
                 if not any(s in parent[1] for s in ["HwlGetPreferredSurfaceSetting", "HwlComputeSurfaceInfoSanityCheck",
                                                    "IsValidDisplaySwizzleMode", "ValidateSwModeParams"]):
                     raise ValueError("swizzle mask 位于未核实的消费者")
-                add(parent[1], address, struct.pack("<I", old), struct.pack("<I", new))
+                add(parent[1], address, struct.pack("<I", old), struct.pack("<I", new), fairplay_decode=True)
                 count += 1
                 cursor = offset + 1
             if count != 4:
                 raise ValueError("swizzle mask 数量不匹配")
         records.sort(key=lambda r: r["address"])
+        # 掩码随排序后的记录生成；只允许显式标记的 AMD 解码项，AppleGVA 与编码项不进入候选。
+        if len(records) > 32:
+            raise ValueError("FairPlay 解码掩码超出 UInt32")
+        decode_mask = 0
+        for i, record in enumerate(records):
+            if record["fairplayDecode"]:
+                if not code_section[1] <= record["address"] < code_section[1] + code_section[2]:
+                    raise ValueError("FairPlay 解码项不属于 AMD 驱动代码段")
+                decode_mask |= 1 << i
         resolver = ResolverData(cache, WORK)
         functions = {"AppleGVA_AMDOnlyFallback": (GVA_CHOICE_ADDRESS, gva_choice), **full_functions}
         for record in records:
@@ -254,6 +273,7 @@ def main():
             header += f'    {{0x{record["address"] - cache.base:X}ULL, Original{i}, Patched{i}, sizeof(Original{i})}},\n'
         pages = len({r["address"] // 4096 for r in records})
         header += "};\n"
+        header += f"inline constexpr UInt32 FairPlayDecodeMask = 0x{decode_mask:X}U;\n"
         identify_index = next(i for i, record in enumerate(records) if record['label'] == '__ZN17VAAcceleratorInfo8identifyEjj')
         device_records = []
         for device, _ in capabilities:

@@ -26,7 +26,7 @@ struct NRed {static NRed& singleton(){static NRed n;return n;}void setProp32(con
  unsigned getDeviceID(){return device; }static unsigned device;};unsigned NRed::device=0x1638;
 struct Version{unsigned major(){return majorValue;}unsigned minor(){return minorValue;}static unsigned majorValue,minorValue;};unsigned Version::majorValue=25;unsigned Version::minorValue=6;
 const PenguinWizardry::KernelVersion& currentKernelVersion(){static std::optional<PenguinWizardry::KernelVersion> current;return current.emplace(Version::majorValue,Version::minorValue);}
-static bool flag=true; static bool checkKernelArgument(const char* s){assert(strcmp(s,"-NRedVideoFix")==0);return flag;}
+static bool flag=true;static bool checkKernelArgument(const char* s){assert(strcmp(s,"-NRedVideoFix")==0);return flag;}
 namespace VCN { static bool active=true; bool allocated(){return active;} }
 #define IONew(T,N) (new T[N])
 #define IODelete(P,T,N) delete[] P
@@ -40,10 +40,12 @@ struct KernelPatcher{
 static task_t current_task(){return reinterpret_cast<void*>(1);}
 #include <UserPatchPolicy.hpp>
 static bool isWindowServer=false;
+static const char* processName="Other";
 static int proc_pid(proc_t p){return int(reinterpret_cast<uintptr_t>(p));}
-static void proc_name(int,char* name,int size){snprintf(name,size,"%s",isWindowServer?"WindowServer":"Other");}
+static void proc_name(int,char* name,int size){snprintf(name,size,"%s",isWindowServer?"WindowServer":processName);}
 static std::map<uint64_t,int> protection,maxProtection;
 static std::set<int> failProtect;
+static std::set<uint64_t> touchedPages;
 static int protectCalls=0,writeCalls=0,failWrite=0,originalResult=0,regionMode=0;
 static bool invalidCache=false,noMap=false;
 static uint64_t base=UserVideoDecodeData::CacheBase+0x100000;
@@ -52,6 +54,7 @@ static size_t N=MaxN;
 static std::array<std::array<uint8_t,UserVideoDecodeData::MaxPatchSize>,MaxN> code;
 static kern_return_t vm_protect(vm_map_t,uint64_t address,unsigned,int setMax,vm_prot_t flags){
  protectCalls++;if(failProtect.contains(protectCalls))return 42;
+ touchedPages.insert(address);
  assert(protection.contains(address));const int value=flags&7;
  if(setMax){maxProtection[address]=value;protection[address]&=value;}else{protection[address]=value;maxProtection[address]|=value;}return 0;
 }
@@ -84,8 +87,8 @@ static int writer(const void* p,uint64_t address,size_t size){
  assert(false);return 1;
 }
 static void reset(){
- protection.clear();maxProtection.clear();properties.clear();failProtect.clear();protectCalls=writeCalls=failWrite=originalResult=regionMode=0;
- invalidCache=noMap=false;seenStages=appliedCount=errorCount=0;isWindowServer=false;
+ protection.clear();maxProtection.clear();properties.clear();failProtect.clear();touchedPages.clear();protectCalls=writeCalls=failWrite=originalResult=regionMode=0;
+ invalidCache=noMap=false;seenStages=appliedCount=errorCount=0;isWindowServer=false;processName="Other";
  clientEntitlement=nullptr;trueEntitlement.releases=falseEntitlement.releases=0;entitlementQueries=0;
  for(size_t i=0;i<MaxN;i++){auto& p=active()[i];memcpy(code[i].data(),p.original,p.size);if(i<N){const auto page=(base+p.offset)&~uint64_t(4095);protection[page]=5;maxProtection[page]=5;}}
  originalCheck=reinterpret_cast<uint64_t>(original);getTaskMap=map;queryRegion=query;readUser=reader;writeUser=writer;
@@ -127,13 +130,76 @@ int main(){
  reset();VCN::active=false;call();assert(writeCalls==0&&protectCalls==0);VCN::active=true;
  reset();originalResult=42;call();assert(writeCalls==0&&protectCalls==0);
  for(int mode=1;mode<=4;mode++){reset();regionMode=mode;call();assert(writeCalls==0&&protectCalls==0);bytes(false);rx();}
- // FairPlay 客户端始终跳过 VCN 补丁；普通进程仍完整应用。
+ // 默认对 FairPlay 客户端应用驱动解码子集；普通进程仍完整应用。
  reset();clientEntitlement=kOSBooleanTrue;call(reinterpret_cast<void*>(969));
- assert(writeCalls==0&&protectCalls==0);bytes(false);rx();
- assert(properties.at("NRedVCNFairPlaySkipped")==1&&properties.at("NRedVCNFairPlaySkipPID")==969);
+ assert(writeCalls==18);rx();
+ assert(properties.at("NRedDRMVideoState")==2&&properties.at("NRedDRMVideoPID")==969);
  assert(entitlementQueries==1&&trueEntitlement.releases==1);
  reset();clientEntitlement=kOSBooleanFalse;call();bytes(true);rx();
  assert(writeCalls==N&&!properties.contains("NRedVCNFairPlaySkipped")&&falseEntitlement.releases==1);
  }
+ // 独立预期：只写驱动侧解码项，AppleGVA 与四项编码修正保持原始字节，且不改变这些页的权限。
+ constexpr unsigned decodeMask=0x7F87FE;
+ auto selected=[](size_t i){return (decodeMask&(1U<<i))!=0;};
+ auto selectedBytes=[&](bool patched){for(size_t i=0;i<N;i++){
+  auto& p=active()[i];assert(memcmp(code[i].data(),patched&&selected(i)?p.patched:p.original,p.size)==0);
+ }};
+ for(unsigned host:{0x15E7U,0x1636U,0x1638U,0x164CU}){
+  NRed::device=host;KernelPatcher p;UserVideoDecode::init(p);
+  assert(properties.at("NRedDRMVideoRevision")==3);
+  reset();processName="Music";clientEntitlement=kOSBooleanTrue;call(reinterpret_cast<void*>(970));
+  assert(writeCalls==18);selectedBytes(true);rx();
+  assert(properties.at("NRedDRMVideoPID")==970&&properties.at("NRedDRMVideoState")==2);
+  assert(properties.at("NRedDRMVideoPatchCount")==18);
+  {SharedRegionCheckArgs empty{0};int value=0;assert(wrappedSharedRegionCheck(reinterpret_cast<void*>(970),&empty,&value)==0&&value==123);}
+  assert(properties.at("NRedDRMVideoState")==2);
+  assert(properties.at("NRedDRMVideoLastPID")==970&&properties.at("NRedDRMVideoLastStage")==2);
+  const auto writes=writeCalls,protects=protectCalls;call(reinterpret_cast<void*>(970));
+  assert(writeCalls==writes&&protectCalls==protects&&properties.at("NRedDRMVideoState")==3);
+  std::set<uint64_t> selectedPages;
+  for(size_t i=0;i<N;i++)if(selected(i))selectedPages.insert((base+active()[i].offset)&~uint64_t(4095));
+  assert(protects==3*int(selectedPages.size())&&touchedPages==selectedPages);
+  for(int entry=1;entry<=18;entry++){
+   reset();processName="Music";clientEntitlement=kOSBooleanTrue;failWrite=entry;call(reinterpret_cast<void*>(970));
+   selectedBytes(false);rx();assert(properties.at("NRedDRMVideoState")==1);
+   assert(properties.at("NRedDRMVideoLastPID")==970&&properties.at("NRedDRMVideoLastStage")==12);
+  }
+  for(int page=1;page<=int(selectedPages.size());page++){
+   reset();processName="Music";clientEntitlement=kOSBooleanTrue;failProtect={page};call(reinterpret_cast<void*>(970));
+   selectedBytes(false);rx();assert(writeCalls==0&&properties.at("NRedDRMVideoState")==1);
+  }
+  reset();processName="Music";clientEntitlement=kOSBooleanTrue;
+  failProtect={int(selectedPages.size())+1,int(selectedPages.size())+2};call(reinterpret_cast<void*>(970));
+  selectedBytes(false);rx();assert(properties.at("NRedDRMVideoState")==1);
+  // 未选择的代码已经被修改时也要拒绝，避免把混合配置当成此次隔离候选。
+  for(size_t i=0;i<N;i++){
+   reset();processName="Music";clientEntitlement=kOSBooleanTrue;
+   memcpy(code[i].data(),active()[i].patched,active()[i].size);call(reinterpret_cast<void*>(970));
+   assert(writeCalls==0&&protectCalls==0&&properties.at("NRedDRMVideoState")==1);
+  }
+  // 权限决定策略，进程名不决定策略；所有 FairPlay 客户端使用同一解码子集。
+  for(const char* name:{"Music","TV","lskdd","MusicHelper","MusicX","music","Other",""}){
+   reset();processName=name;clientEntitlement=kOSBooleanTrue;call(reinterpret_cast<void*>(971));
+   assert(writeCalls==18&&properties.at("NRedDRMVideoState")==2);
+   assert(properties.at("NRedDRMVideoPID")==971&&touchedPages==selectedPages);selectedBytes(true);rx();
+   assert(entitlementQueries==1&&trueEntitlement.releases==1);
+   for(auto* entitlement:{static_cast<OSObject*>(nullptr),static_cast<OSObject*>(kOSBooleanFalse)}){
+    reset();processName=name;clientEntitlement=entitlement;call(reinterpret_cast<void*>(971));
+    assert(writeCalls==N&&!properties.contains("NRedDRMVideoState"));bytes(true);rx();
+   }
+  }
+  reset();processName="Music";call(reinterpret_cast<void*>(970));bytes(true);rx();assert(writeCalls==N);
+  reset();processName="Music";clientEntitlement=kOSBooleanTrue;originalResult=42;call(reinterpret_cast<void*>(970));
+  assert(writeCalls==0&&protectCalls==0&&!properties.contains("NRedDRMVideoState"));
+ }
+ for(unsigned major:{23U,24U}){
+  Version::majorValue=major;KernelPatcher p;UserVideoDecode::init(p);
+  for(const char* name:{"Music","TV","Other"}){
+   reset();processName=name;clientEntitlement=kOSBooleanTrue;call(reinterpret_cast<void*>(970));
+   assert(writeCalls==0&&protectCalls==0&&!properties.contains("NRedDRMVideoState"));bytes(false);rx();
+  }
+ }
+ Version::majorValue=25;flag=false;{KernelPatcher disabled;UserVideoDecode::init(disabled);assert(disabled.solves==0&&disabled.routes==0);}
  puts("PASS: four VCN2 device paths; video COW bridge; every partial write/protection failure rolls back; RX/max restored; status preserved");
+ puts("PASS: default unified FairPlay policy; 18 selected writes; excluded pages untouched; rollback, mixed-state refusal, video master switch and OS gates");
 }
