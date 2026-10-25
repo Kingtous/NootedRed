@@ -2,7 +2,7 @@ name: Wake Research
 
 on:
   push:
-    branches: [codex/wake-video-research]
+    branches: [codex/wake-video-research, codex/vcn-drain-gfx-guard]
   workflow_dispatch:
 
 permissions:
@@ -28,9 +28,11 @@ jobs:
           mkdir -p build/research-info
           git rev-parse HEAD > build/research-info/commit.txt
           xcodebuild -version > build/research-info/xcode.txt
-          echo 'v1.0.0 + upstream 5a941329 teardown/HEVC changes + wake boundary diagnostics; not a proven sleep fix.' > build/research-info/scope.txt
+          echo 'v1.0.0 + upstream teardown changes; scoped drain GFXOFF pairing, monotonic polling deadline, unverified native fallback; device acceptance pending.' > build/research-info/scope.txt
       - name: Test VCN drain failure paths
-        run: python3 tools/test_wake_drain.py
+        run: |
+          python3 tools/test_wake_drain.py
+          python3 tools/test_vcn_drain_guard.py
       - name: Build kext
         env:
           CONFIGURATION: ${{ matrix.configuration }}
@@ -44,7 +46,7 @@ jobs:
           import os, plistlib
           p = Path('build') / os.environ['CONFIGURATION'] / 'NootedRed.kext'
           data = (p / 'Contents/MacOS/NootedRed').read_bytes()
-          for marker in (b'NRedWakeResearchRevision', b'NRedVCNDrainBuild', b'WakeTrace', b'-NRedVDA'):
+          for marker in (b'NRedWakeResearchRevision', b'NRedVCNDrainBuild', b'NRedVCNDrainWaitRevision', b'WakeTrace', b'-NRedVDA'):
               assert marker + b'\0' in data, marker
           assert b'-NRedVCNNoGfxOff\0' not in data
           assert plistlib.loads((p / 'Contents/Info.plist').read_bytes())['CFBundleIdentifier'] == 'org.ChefKiss.NootedRed'

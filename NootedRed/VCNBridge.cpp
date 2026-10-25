@@ -30,6 +30,8 @@
 #include <Kexts.hpp>
 #include <NRed.hpp>
 #include <VCNBridge.hpp>
+#include <VCNDrain.hpp>
+#include <kern/clock.h>
 #include <VCNKernelData.hpp>
 #if __has_include(<VCNKernelDataTahoe.hpp>)
 #include <VCNKernelDataTahoe.hpp>
@@ -285,7 +287,8 @@ bool VCNBridge::acceleratorStart(void* const self, IOService* const provider)
         // Build marker. It cannot live in init(): that runs at kext load, before NRed::iGPU is set, and
         // setProp32() is a no-op while iGPU is null, so the marker never reached the registry.
         NRed::singleton().setProp32("NRedVCNDrainBuild", 2);
-        NRed::singleton().setProp32("NRedWakeResearchRevision", 1);
+        NRed::singleton().setProp32("NRedWakeResearchRevision", 2);
+        NRed::singleton().setProp32("NRedVCNDrainWaitRevision", 2);
         NRed::singleton().setProp32("NRedVCNAccelStartSeen", 1);
         publishStage(5);
     }
@@ -443,48 +446,44 @@ void VCNBridge::drainVCN(const char* const reason)
 
     if (!bridge.engineEnabled() || bridge.vcnEngine == nullptr || bridge.noDrain) { return; }
 
-    // Poll the engine's own idle query so a wedged channel can never stall teardown for longer than the
-    // bound; the driver's waitForIdle is only used when the idle query is unavailable.  Every teardown is
-    // waited on: a timeout is recorded, never used to switch the drain off, so a bad first teardown cannot
-    // leave every later one unprotected.
-    UInt32 waited = 0;
-    bool   idle   = false;
-
-    if (bridge.vcnIsIdle != 0) {
-        const auto isIdle = reinterpret_cast<bool (*)(void*)>(bridge.vcnIsIdle);
-        for (; waited <= kDrainTimeoutMs; waited += kDrainStepMs) {
-            if (isIdle(bridge.vcnEngine)) {
-                idle = true;
-                break;
-            }
-            IOSleep(kDrainStepMs);
-        }
-    }
-    else if (bridge.vcnWaitForIdle != 0) {
-        // The driver's own wait is self-bounding; it cannot tell us whether it actually drained.
-        reinterpret_cast<void (*)(void*, UInt32)>(bridge.vcnWaitForIdle)(bridge.vcnEngine, kDrainTimeoutMs);
-        waited = kDrainTimeoutMs;
-        idle   = true;
-    }
-    else {
-        return;
-    }
+    const auto now = +[]() -> UInt64 {
+        UInt64 absolute{0}, ns{0};
+        clock_get_uptime(&absolute);
+        absolutetime_to_nanoseconds(absolute, &ns);
+        return ns;
+    };
+    const auto sleep = +[](UInt32 delay) { IOSleep(delay); };
+    const auto observed = VCNDrain::wait(
+        bridge.vcnEngine, bridge.hardwareHandle, reinterpret_cast<VCNDrain::Query>(bridge.vcnIsIdle),
+        reinterpret_cast<VCNDrain::GfxControl>(bridge.drainDisableGfxOff),
+        reinterpret_cast<VCNDrain::GfxControl>(bridge.drainEnableGfxOff),
+        reinterpret_cast<VCNDrain::NativeWait>(bridge.vcnWaitForIdle), now, sleep,
+        kDrainTimeoutMs, kDrainStepMs);
 
     if (bridge.drainCount < 32) {
-        SYSLOG("WakeTrace", "vcn-drain reason=%s waited=%u idle=%u", reason, waited, static_cast<UInt32>(idle));
+        SYSLOG("WakeTrace", "vcn-drain-v2 reason=%s elapsed=%u requested=%u outcome=%u gfxGuard=%u", reason,
+               observed.elapsedMs, observed.requestedSleepMs, static_cast<UInt32>(observed.outcome),
+               static_cast<UInt32>(observed.gfxGuardUsed));
     }
     ++bridge.drainCount;
-    bridge.lastWaitMs = waited;
-    if (waited > bridge.maxWaitMs) { bridge.maxWaitMs = waited; }
-    NRed::singleton().setProp32("NRedVCNIdleWaitedMs", waited);
+    bridge.lastWaitMs = observed.elapsedMs;
+    if (observed.elapsedMs > bridge.maxWaitMs) { bridge.maxWaitMs = observed.elapsedMs; }
+    NRed::singleton().setProp32("NRedVCNIdleWaitedMs", observed.elapsedMs);
     NRed::singleton().setProp32("NRedVCNIdleWaitedMaxMs", bridge.maxWaitMs);
+    NRed::singleton().setProp32("NRedVCNIdleRequestedSleepMs", observed.requestedSleepMs);
+    NRed::singleton().setProp32("NRedVCNIdleLastOutcome", static_cast<UInt32>(observed.outcome));
+    NRed::singleton().setProp32("NRedVCNIdleGfxGuard", static_cast<UInt32>(observed.gfxGuardUsed));
     NRed::singleton().setProp32("NRedVCNIdleDrains", bridge.drainCount);
-
-    if (!idle) {
+    if (observed.outcome == VCNDrain::Outcome::TimedOut) {
         ++bridge.drainTimeouts;
         NRed::singleton().setProp32("NRedVCNIdleTimeout", 1);
         NRed::singleton().setProp32("NRedVCNIdleTimeouts", bridge.drainTimeouts);
-        SYSLOG("VCN", "VCN engine still busy after %u ms at %s; teardown continues", waited, reason);
+        SYSLOG("VCN", "VCN idle not observed after %u actual ms at %s; teardown continues",
+               observed.elapsedMs, reason);
+    } else if (observed.outcome == VCNDrain::Outcome::NativeUnverified) {
+        NRed::singleton().setProp32("NRedVCNIdleUnverified", ++bridge.drainUnverified);
+    } else if (observed.outcome == VCNDrain::Outcome::Unavailable) {
+        NRed::singleton().setProp32("NRedVCNIdleUnavailable", ++bridge.drainUnavailable);
     }
 }
 
@@ -590,6 +589,11 @@ void VCNBridge::processKext(KernelPatcher& patcher, const size_t id, const mach_
                       this->surfaceCopy5000, slide, size);
         ok &= resolve(patcher, id, "__ZN30AMDRadeonX5000_AMDGFX9Hardware15notifyGfxAccessEv", this->notifyGfxAccess,
                       slide, size);
+        // Match the native waitForIdle GFXOFF pair, scoped to our polling only. These are not hooks.
+        resolve(patcher, id, "__ZN28AMDRadeonX5000_AMDRTHardware13disableGfxOffEv",
+                this->drainDisableGfxOff, slide, size);
+        resolve(patcher, id, "__ZN28AMDRadeonX5000_AMDRTHardware12enableGfxOffEv",
+                this->drainEnableGfxOff, slide, size);
         if (!ok) {
             publishReject(9);
             SYSLOG("VCN", "failed to resolve X5000 bridge symbols");
@@ -680,8 +684,7 @@ void VCNBridge::processKext(KernelPatcher& patcher, const size_t id, const mach_
         ok &= resolve(patcher, id, "__ZN31AMDRadeonX6000_IAMDSMLInterface18createSMLInterfaceEj",
                       this->createSML6000, slide, size);
 
-        // Teardown drain entry points.  Both are optional: if either symbol is missing the drain becomes a
-        // no-op and the bridge behaves exactly as before.
+        // Optional query methods. A void native wait is reported as unverified, never as confirmed idle.
         resolve(patcher, id, "__ZN30AMDRadeonX6000_AMDVCN2HWEngine6isIdleEv", this->vcnIsIdle, slide, size);
         resolve(patcher, id, "__ZN26AMDRadeonX6000_AMDHWEngine11waitForIdleEj", this->vcnWaitForIdle, slide,
                 size);

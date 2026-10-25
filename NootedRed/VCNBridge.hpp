@@ -71,6 +71,8 @@ class VCNBridge
     mach_vm_address_t clientStop5000{0};
     mach_vm_address_t surfaceCopy5000{0};
     mach_vm_address_t notifyGfxAccess{0};
+    mach_vm_address_t drainDisableGfxOff{0};
+    mach_vm_address_t drainEnableGfxOff{0};
 
     // Teardown drain. Apple's VA driver releases a decode buffer as soon as the last submission is queued,
     // so a VCN read that is still in flight can hit an unmapped page, wedge channel 12 and take the whole GPU
@@ -82,6 +84,8 @@ class VCNBridge
     bool              noDrain{false};
     UInt32            drainCount{0};
     UInt32            drainTimeouts{0};
+    UInt32            drainUnverified{0};
+    UInt32            drainUnavailable{0};
     UInt32            lastWaitMs{0};
     UInt32            maxWaitMs{0};
 
