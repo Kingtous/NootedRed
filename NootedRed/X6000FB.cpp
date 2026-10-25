@@ -597,18 +597,26 @@ IOReturn X6000FB::getTriageHardwareDataRN(void*, const UInt32 fbIndex, void* con
 
 UInt32 X6000FB::wrapControllerPowerUp(void* const self)
 {
+    static UInt32 traces{0};
+    const bool trace = __atomic_fetch_add(&traces, 1U, __ATOMIC_RELAXED) < 16;
+    if (trace) { SYSLOG("WakeTrace", "controller-powerup enter"); }
     auto& m_flags  = getMember<UInt8>(self, 0x5F18);
     auto  send     = (m_flags & 2) == 0;
     m_flags       |= 4;    // All framebuffers enabled
     auto ret       = FunctionCast(wrapControllerPowerUp, singleton().orgControllerPowerUp)(self);
     if (send) { singleton().orgMessageAccelerator(self, IOFBRequestControllerEnabled, nullptr, nullptr, nullptr); }
+    if (trace) { SYSLOG("WakeTrace", "controller-powerup return=%u notify=%u", ret, static_cast<UInt32>(send)); }
     return ret;
 }
 
 void X6000FB::wrapDpReceiverPowerCtrl(void* const link, const bool powerOn)
 {
+    static UInt32 traces{0};
+    const bool trace = __atomic_fetch_add(&traces, 1U, __ATOMIC_RELAXED) < 32;
+    if (trace) { SYSLOG("WakeTrace", "receiver-power enter on=%u", static_cast<UInt32>(powerOn)); }
     FunctionCast(wrapDpReceiverPowerCtrl, singleton().orgDpReceiverPowerCtrl)(link, powerOn);
     IOSleep(250);
+    if (trace) { SYSLOG("WakeTrace", "receiver-power return on=%u", static_cast<UInt32>(powerOn)); }
 }
 
 void* X6000FB::wrapCreateObjectInfo(void* const helper, const UInt32 tableOffset)

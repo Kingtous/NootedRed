@@ -285,6 +285,7 @@ bool VCNBridge::acceleratorStart(void* const self, IOService* const provider)
         // Build marker. It cannot live in init(): that runs at kext load, before NRed::iGPU is set, and
         // setProp32() is a no-op while iGPU is null, so the marker never reached the registry.
         NRed::singleton().setProp32("NRedVCNDrainBuild", 2);
+        NRed::singleton().setProp32("NRedWakeResearchRevision", 1);
         NRed::singleton().setProp32("NRedVCNAccelStartSeen", 1);
         publishStage(5);
     }
@@ -351,9 +352,11 @@ void VCNBridge::acceleratorStop(void* const self, IOService* const provider)
 
     // Let in-flight VCN work finish before the accelerator releases its memory.  This is the last point at
     // which the engine is still valid, so the drain has to happen before the original stop runs.
+    SYSLOG("WakeTrace", "accelerator-stop enter");
     bridge.drainVCN("accelerator stop");
 
     FunctionCast(acceleratorStop, bridge.orgAcceleratorStop)(self, provider);
+    SYSLOG("WakeTrace", "accelerator-stop return");
 
     // The accelerator is going away; drop all engine/accelerator state without touching the hardware
     // object.  The prepared X5000/X6000 symbols stay valid for a possible restart, and a new start will
@@ -417,10 +420,14 @@ void VCNBridge::clientStop(void* const self, void* const provider)
 
     // The decoder's IOAccel client is going away; its decode buffers are released by the stop below.  Wait
     // for the VCN ring to drain first so no read is still pointing at memory that is about to be unmapped.
+    static UInt32 traces{0};
+    const bool trace = __atomic_fetch_add(&traces, 1U, __ATOMIC_RELAXED) < 32;
+    if (trace) { SYSLOG("WakeTrace", "client-stop enter"); }
     bridge.drainVCN("client stop");
 
     const auto address = bridge.engineEnabled() ? bridge.clientStop5000 : bridge.orgClientStop;
     reinterpret_cast<void (*)(void*, void*)>(address)(self, provider);
+    if (trace) { SYSLOG("WakeTrace", "client-stop return"); }
 }
 
 UInt64 VCNBridge::surfaceCopy(void* const self, void* const input, const UInt64 size, void* const event)
@@ -463,6 +470,9 @@ void VCNBridge::drainVCN(const char* const reason)
         return;
     }
 
+    if (bridge.drainCount < 32) {
+        SYSLOG("WakeTrace", "vcn-drain reason=%s waited=%u idle=%u", reason, waited, static_cast<UInt32>(idle));
+    }
     ++bridge.drainCount;
     bridge.lastWaitMs = waited;
     if (waited > bridge.maxWaitMs) { bridge.maxWaitMs = waited; }
@@ -492,6 +502,7 @@ void VCNBridge::signalWork(void* const hardware)
 bool VCNBridge::initHardware(void* const self, const UInt32 channel)
 {
     auto& bridge = singleton();
+    SYSLOG("WakeTrace", "vcn-init enter channel=%u", channel);
     const auto result = FunctionCast(initHardware, bridge.orgInitHardware)(self, channel);
     NRed::singleton().setProp32("NRedVCNLastHardwareInit", static_cast<UInt32>(result));
 

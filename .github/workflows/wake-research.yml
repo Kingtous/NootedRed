@@ -1,0 +1,63 @@
+name: Wake Research
+
+on:
+  push:
+    branches: [codex/wake-video-research]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Release, Debug]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Prepare pinned Xcode dependencies
+        run: |
+          git clone https://github.com/acidanthera/Lilu.git Lilu
+          git -C Lilu checkout 0515f40b7f2a096adc85e832a4c6104fbd07f936
+          git clone https://github.com/acidanthera/MacKernelSDK.git MacKernelSDK
+          git -C MacKernelSDK checkout 7af1933c27aefcbdf4809ee44478829aad30f9c1
+          cp LICENSE.md LICENSE
+          mkdir -p build/research-info
+          git rev-parse HEAD > build/research-info/commit.txt
+          xcodebuild -version > build/research-info/xcode.txt
+          echo 'v1.0.0 + upstream 5a941329 teardown/HEVC changes + wake boundary diagnostics; not a proven sleep fix.' > build/research-info/scope.txt
+      - name: Test VCN drain failure paths
+        run: python3 tools/test_wake_drain.py
+      - name: Build kext
+        env:
+          CONFIGURATION: ${{ matrix.configuration }}
+        run: xcodebuild -quiet -configuration "$CONFIGURATION" -arch x86_64 GCC_GENERATE_DEBUGGING_SYMBOLS=YES DEBUG_INFORMATION_FORMAT=dwarf-with-dsym build
+      - name: Check candidate markers
+        env:
+          CONFIGURATION: ${{ matrix.configuration }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, plistlib
+          p = Path('build') / os.environ['CONFIGURATION'] / 'NootedRed.kext'
+          data = (p / 'Contents/MacOS/NootedRed').read_bytes()
+          for marker in (b'NRedWakeResearchRevision', b'NRedVCNDrainBuild', b'WakeTrace', b'-NRedVDA'):
+              assert marker + b'\0' in data, marker
+          assert b'-NRedVCNNoGfxOff\0' not in data
+          assert plistlib.loads((p / 'Contents/Info.plist').read_bytes())['CFBundleIdentifier'] == 'org.ChefKiss.NootedRed'
+          print('Research markers verified; retired global GFXOFF hold absent')
+          PY
+          xcrun dwarfdump --uuid "build/$CONFIGURATION/NootedRed.kext/Contents/MacOS/NootedRed" > "build/research-info/uuid.txt"
+      - name: Upload research artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: wake-research-${{ matrix.configuration }}-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            build/${{ matrix.configuration }}/*.zip
+            build/${{ matrix.configuration }}/*.kext.dSYM/**
+            build/research-info/**
